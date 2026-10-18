@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: prastav-backend
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/prastav}
+    username: ${DB_USER:prastav}
+    password: ${DB_PASSWORD:prastav}
+  jpa:
+    # Flyway owns the schema; Hibernate never creates or alters tables.
+    hibernate:
+      ddl-auto: none
+    # Mapping to DTOs happens after the service transaction; associations the mappers read are eager.
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: 8080
+
+prastav:
+  jwt:
+    # Development default only. Override with JWT_SECRET (at least 32 bytes) outside a demo.
+    secret: ${JWT_SECRET:prastav-dev-only-secret-change-me-0123456789}
+    expiration-minutes: 60
+  cors:
+    allowed-origin: ${CORS_ORIGIN:http://localhost:5173}
+  seed:
+    enabled: ${SEED_DEMO_DATA:true}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

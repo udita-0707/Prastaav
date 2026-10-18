@@ -1,0 +1,22 @@
+# Milestone 1: PostgreSQL only. The backend and frontend run locally (see README.md).
+# Containerising backend and frontend is planned for Milestone 2.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: prastav-db
+    environment:
+      POSTGRES_DB: prastav
+      POSTGRES_USER: prastav
+      POSTGRES_PASSWORD: prastav
+    ports:
+      - "5432:5432"
+    volumes:
+      - prastav-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prastav -d prastav"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  prastav-db-data:
