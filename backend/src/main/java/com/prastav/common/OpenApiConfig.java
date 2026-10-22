@@ -1,0 +1,18 @@
+package com.prastav.common;
+
+import io.swagger.v3.oas.annotations.OpenAPIDefinition;
+import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
+import io.swagger.v3.oas.annotations.info.Info;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.security.SecurityScheme;
+import org.springframework.context.annotation.Configuration;
+
+/** Swagger UI metadata and the "Authorize" button for Bearer JWTs. */
+@Configuration
+@OpenAPIDefinition(
+        info = @Info(title = "Prastav API", version = "M1",
+                description = "Academic project proposal workflow and approval"),
+        security = @SecurityRequirement(name = "bearerAuth"))
+@SecurityScheme(name = "bearerAuth", type = SecuritySchemeType.HTTP, scheme = "bearer", bearerFormat = "JWT")
+public class OpenApiConfig {
+}
