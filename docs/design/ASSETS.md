@@ -24,6 +24,12 @@ All images are referenced from `frontend/src/assets/index.ts`, so a file can be 
 | `mountain-lake.svg` | 400 × 300 | Faculty home quote card (cropped to cover) |
 | `sidebar-leaves.svg` | 260 × 200 | Decoration at the bottom of the sidebar |
 
+## Animations (`frontend/src/assets/animations/`, bundled by Vite)
+
+| File | Size | Used in |
+| --- | --- | --- |
+| `review.mp4` | 512 × 512, 2.5 s loop, 136 KB | Landing page, How it works, "Review" step tile. Plays muted and inline; its white background is multiplied into the tile tint; it stays on its first frame for visitors who prefer reduced motion |
+
 ## Still to replace
 
-Every file above is a placeholder. Final artwork should keep the file names and roughly the same aspect ratios; keep the background transparent so the illustrations sit on the tinted page.
+Every brand and illustration file above is a placeholder; `review.mp4` is final artwork. Final artwork should keep the file names and roughly the same aspect ratios; keep the background transparent so the illustrations sit on the tinted page.

@@ -1,5 +1,6 @@
 // Every image the app shows is referenced from here, so a file can be replaced without touching components.
 // Files under public/brand are served as-is; illustrations are bundled by Vite. See docs/design/ASSETS.md.
+import reviewAnimation from './animations/review.mp4';
 import assignFaculty from './illustrations/assign-faculty.svg';
 import coordinatorLaptop from './illustrations/coordinator-laptop.svg';
 import emptyProjects from './illustrations/empty-projects.svg';
@@ -26,4 +27,9 @@ export const illustrations = {
   welcomeBanner,
   mountainLake,
   sidebarLeaves,
+} as const;
+
+/** Short looping clips (muted, played inline). */
+export const animations = {
+  review: reviewAnimation,
 } as const;

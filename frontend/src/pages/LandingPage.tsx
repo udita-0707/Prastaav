@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { Navigate } from 'react-router-dom';
 import type { ProjectStatus } from '../api/types';
-import { brand, illustrations } from '../assets';
+import { animations, brand, illustrations } from '../assets';
 import { useAuth } from '../auth/AuthContext';
 import { Avatar, ButtonLink, Card, IconTile, Logo, StatusPill, type Tone } from '../components/ui';
 import { INSTITUTION_NAME, PRODUCT_NAME, TAGLINE } from '../config/brand';
@@ -60,10 +60,10 @@ const ROLES = [
   },
 ];
 
-const STEPS: { icon: LucideIcon; tone: Tone; title: string; text: string }[] = [
+const STEPS: { icon: LucideIcon; tone: Tone; title: string; text: string; animation?: string }[] = [
   { icon: FilePlus2, tone: 'amber', title: 'Create', text: 'Write the proposal in four guided steps and save drafts as you go.' },
   { icon: Send, tone: 'sky', title: 'Submit', text: 'Submitting freezes the version and sends it to the coordinator.' },
-  { icon: UserSearch, tone: 'violet', title: 'Review', text: 'The coordinator assigns a faculty reviewer, who records a decision.' },
+  { icon: UserSearch, tone: 'violet', title: 'Review', text: 'The coordinator assigns a faculty reviewer, who records a decision.', animation: animations.review },
   { icon: RotateCcw, tone: 'green', title: 'Revise or approve', text: 'Revise and resubmit when changes are requested, until approved.' },
 ];
 
@@ -134,6 +134,18 @@ function ProductPreview() {
       </div>
       <figcaption className="mt-3 text-center text-xs text-muted">Sample data. Your dashboard shows your own projects.</figcaption>
     </figure>
+  );
+}
+
+const prefersReducedMotion = () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** A step's looping clip in the same tile as the icons. The clip's white background is multiplied into the tile tint; it stays on its first frame when the visitor prefers reduced motion. */
+function StepAnimation({ src }: { src: string }) {
+  const still = prefersReducedMotion();
+  return (
+    <span className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-violet-50" aria-hidden>
+      <video src={src} className="h-full w-full object-cover mix-blend-multiply" autoPlay={!still} loop={!still} muted playsInline preload="auto" />
+    </span>
   );
 }
 
@@ -267,13 +279,17 @@ export function LandingPage() {
           <div className="mx-auto max-w-canvas px-4 py-16 sm:px-8 lg:px-16">
             <SectionHeading eyebrow="How it works" title="Simple steps. Clear decisions." />
             <ol className="mt-10 grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-              {STEPS.map(({ icon: Icon, tone, title, text }, index) => (
+              {STEPS.map(({ icon: Icon, tone, title, text, animation }, index) => (
                 <li key={title} className="relative">
                   <div className="flex items-center gap-3">
                     <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ink text-xs font-bold text-white">{index + 1}</span>
-                    <IconTile tone={tone} size="lg">
-                      <Icon className="h-6 w-6" />
-                    </IconTile>
+                    {animation ? (
+                      <StepAnimation src={animation} />
+                    ) : (
+                      <IconTile tone={tone} size="lg">
+                        <Icon className="h-6 w-6" />
+                      </IconTile>
+                    )}
                   </div>
                   <h3 className="mt-4 font-bold text-ink">{title}</h3>
                   <p className="mt-1.5 text-sm leading-relaxed text-muted">{text}</p>
