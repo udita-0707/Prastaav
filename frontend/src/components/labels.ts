@@ -3,8 +3,8 @@ import type { ProjectStatus, ProposalContent, ReviewDecision, Role } from '../ap
 export const STATUS_LABEL: Record<ProjectStatus, string> = {
   DRAFT: 'Draft',
   SUBMITTED: 'Submitted',
-  UNDER_REVIEW: 'Under review',
-  REVISION_REQUESTED: 'Revision requested',
+  UNDER_REVIEW: 'Under Review',
+  REVISION_REQUESTED: 'Changes Requested',
   APPROVED: 'Approved',
   REJECTED: 'Rejected',
 };
