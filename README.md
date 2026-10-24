@@ -1,102 +1,199 @@
 # Prastaav
 
-Academic project workflow and approval system: students submit structured project proposals, a coordinator assigns a faculty reviewer, and the reviewer approves, requests a revision or rejects. Every submitted version is immutable and every action is audited.
+**Ideas → Proposals → Impact.** Prastaav is an academic project proposal workflow and approval system. Students write structured project proposals, the coordinator assigns a faculty reviewer, and the reviewer approves, requests changes or rejects. Every submitted version is immutable, every review points to the exact version it judged, and every important action is recorded in an append-only audit log.
 
-This repository is the **Milestone 1** submission: a working vertical slice of the full lifecycle (FR-1 to FR-11) plus the low level design and UML for the whole system, with Milestone 2 features designed but not implemented.
+## Features by role
 
-| Part | Location |
-|---|---|
-| Backend (`prastav-backend`): Spring Boot 3, Java 17, Maven | `backend/` |
-| Frontend (`prastav-frontend`): React 18 + TypeScript, Vite | `frontend/` |
-| Database: PostgreSQL 16 via Docker | `docker-compose.yml` |
-| Low level design (whole system, M1/M2 tagged) | `docs/LLD.md`, `docs/LLD.pdf` |
-| UML: PlantUML sources and PNGs | `docs/uml/*.puml`, `docs/uml/png/` |
-| UML: Mermaid | `docs/diagrams.md`, renders in `docs/uml/mermaid-png/` |
-| Viva preparation and change guide | `docs/INTERVIEW_PREP.md` |
-| Two-person commit plan | `COMMIT_PLAN.md` |
+**Student**
+- Create a project and write the proposal in a four-step wizard (basic info; problem and objectives; methodology and outcomes; timeline and review), saving drafts at any step.
+- Submit the proposal; the submitted version is frozen.
+- Follow the status on the home dashboard (totals, drafts, in review, approved) and get an alert when a reviewer requests changes.
+- Read the reviewer's feedback, start the next version (prefilled from the last one) and resubmit it to the same reviewer.
+- Browse earlier versions, reviews and the full timeline of a project.
 
-## Prerequisites
+**Faculty**
+- See the projects assigned to you, with counts of pending reviews and projects awaiting student changes.
+- Review the latest submitted version: approve, request changes or reject. Comments are required for the last two.
+- A "Reviews" list shows what waits for your decision, the longest-waiting first.
 
-- JDK 17 or newer, Maven 3.9+
-- Node.js 20+ and npm
-- Docker (for PostgreSQL), or a local PostgreSQL 16 with database/user/password `prastav`
+**Coordinator**
+- See every project with counts by status, search, status and faculty filters, sorting and paging.
+- Assign a faculty reviewer to submitted projects from the "Assign Faculty" page, from any list row or from the project page.
+- Follow every review in progress from the "Reviews" list.
+
+## Screens
+
+| Screen | Route | Who |
+| --- | --- | --- |
+| Landing page | `/` | everyone (signed-in users go to `/app`) |
+| Sign in, with demo-account buttons | `/login` | everyone |
+| Create an account | `/register` | students and faculty |
+| Home dashboard | `/app` | each role has its own |
+| Project list (My / Assigned / All Projects) | `/app/projects` | all roles, scoped by role |
+| Create project wizard | `/app/projects/new` | student |
+| Project page: overview, versions, reviews, timeline, next step | `/app/projects/:id` | participants |
+| Edit draft or revision | `/app/projects/:id/edit` | student owner |
+| Reviews (Under Review projects) | `/app/reviews` | faculty, coordinator |
+| Assign faculty | `/app/assign` | coordinator |
+
+The mockups the screens follow are in [`docs/design`](docs/design/README.md).
+
+## Architecture
+
+A **modular monolith**: one Spring Boot application and one PostgreSQL database, organised by module (`auth`, `project`, `proposal`, `review`, `workflow`, `audit`, `common`). The workflow engine uses the State pattern: each project status is a class that owns its legal actions, so an illegal transition is rejected with `409 ILLEGAL_TRANSITION`. Domain events feed the audit log. The API returns `allowedActions` for the caller with every project, and the web app only shows the buttons the backend allows.
+
+The web app is a React single-page app. Pages are composed from a small design system (`frontend/src/components/ui`), data comes from the REST API through TanStack Query, and list filters live in the URL so a filtered list can be shared. See `docs/LLD.md` for the full design, including the frontend architecture.
+
+## Tech stack
+
+| Part | Technology |
+| --- | --- |
+| Backend (`prastav-backend`) | Java 17, Spring Boot 3.3, Spring Security (JWT), Spring Data JPA, Flyway, springdoc-openapi |
+| Database | PostgreSQL 16 (Docker Compose for development) |
+| Frontend (`prastav-frontend`) | React 18, TypeScript, Vite, React Router, TanStack Query, Axios |
+| UI | Tailwind CSS 3, lucide-react icons, Plus Jakarta Sans (self-hosted through Fontsource) |
+| Tests | JUnit 5, Mockito, MockMvc |
 
 ## Run it
+
+Prerequisites: JDK 17 or newer, Maven 3.9+, Node.js 20+ and Docker (or a local PostgreSQL 16 with database, user and password `prastav`).
 
 ```bash
 docker compose up -d                              # PostgreSQL on localhost:5432
 cd backend && mvn spring-boot:run                 # API on http://localhost:8080 (Flyway migrates, demo users are seeded)
-cd frontend && npm install && npm run dev         # UI on http://localhost:5173 (in a second terminal)
+cd frontend && npm install && npm run dev         # web app on http://localhost:5173 (second terminal)
 ```
 
-- UI: http://localhost:5173
-- Swagger UI: http://localhost:8080/swagger-ui.html (log in via `POST /api/auth/login`, then click **Authorize** and paste the token)
+Open http://localhost:5173. Swagger UI is at http://localhost:8080/swagger-ui.html: sign in with `POST /api/auth/login`, click **Authorize** and paste the token.
 
 ### Demo accounts
 
-All seeded accounts use the password **Password@123**.
+All seeded accounts use the password **Password@123**. The sign-in page has "Try demo accounts" buttons that fill these in.
 
 | Role | Email |
-|---|---|
+| --- | --- |
 | Coordinator | coordinator@prastav.edu |
 | Faculty | anita.rao@prastav.edu, vikram.shah@prastav.edu |
 | Student | aarav@prastav.edu, diya@prastav.edu, rohan@prastav.edu |
 
-The login page has a "Demo accounts" list that fills these in.
+## Configuration
 
-### Configuration
+### Backend
 
 | Variable | Default | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `DB_URL` | `jdbc:postgresql://localhost:5432/prastav` | JDBC URL |
 | `DB_USER` / `DB_PASSWORD` | `prastav` / `prastav` | database credentials |
 | `JWT_SECRET` | development-only value | HS256 key, at least 32 bytes; set your own outside a demo |
 | `CORS_ORIGIN` | `http://localhost:5173` | allowed browser origin |
-| `SEED_DEMO_DATA` | `true` | create demo users on an empty database |
+| `SEED_DEMO_DATA` | `true` | create the demo users on an empty database |
 
-## Tests
+### Frontend and institution
 
-```bash
-cd backend && mvn test        # JUnit 5 + Mockito unit tests and MockMvc slice tests; no database needed
-cd frontend && npm run build  # type-check (tsc) and production build
-```
+Copy `frontend/.env.example` to `frontend/.env` to change these.
 
-Unit tests cover every state class (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` and the audit listener. `ProjectControllerWebTest` checks 401, 403 and 409 error mapping through the real security configuration.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VITE_INSTITUTION_NAME` | `Your University` | institution name in the landing page footer |
+| `VITE_SHOW_DEMO_ACCOUNTS` | `true` | show the demo-account buttons on the sign-in page; set `false` when the backend runs without seed data |
+| `VITE_API_BASE_URL` | `/api` | API base URL; the default goes through the Vite dev proxy to port 8080 |
 
-## Five-minute demo script
+The product name and tagline are defined once in `frontend/src/config/brand.ts`, and every image is referenced from `frontend/src/assets/index.ts`, so the logo and illustrations can be replaced without code changes (see [`docs/design/ASSETS.md`](docs/design/ASSETS.md)).
 
-1. Sign in as **aarav@prastav.edu**, create a project, fill all proposal fields, then **Submit v1 for review**.
-2. Sign in as **coordinator@prastav.edu**, open the project, choose **Dr. Anita Rao**, **Assign reviewer**.
-3. Sign in as **anita.rao@prastav.edu**, choose **Request revision**, write a comment, **Record decision**.
-4. As the student: read the feedback, **Start version 2**, edit, save, **Resubmit v2**. Use the v1/v2 tabs to show v1 is unchanged.
-5. As the faculty member: **Approve**.
-6. In Swagger: `GET /api/projects/{id}/history` shows every step; then `POST /api/projects/{id}/reviews` with `{"decision":"APPROVE"}` on a project that is only SUBMITTED returns **409 ILLEGAL_TRANSITION**.
-7. Walk through `ProjectState`, `UnderReviewState`, `WorkflowService` and `SubmittedStateTest` (see `docs/INTERVIEW_PREP.md`, part C).
+## API
+
+Base path `/api`; every endpoint except register, login and Swagger needs `Authorization: Bearer <jwt>`. Errors share one body: `{ timestamp, status, code, message, path, fieldErrors[] }`. The full contracts are in `docs/LLD.md` section 10.
+
+| Method | Path | Role | Purpose |
+| --- | --- | --- | --- |
+| POST | `/auth/register`, `/auth/login` | public | Register a student or faculty account; sign in |
+| GET | `/users?role=FACULTY` | coordinator | Faculty list for assignment |
+| POST | `/projects` | student | Create a project with draft v1 |
+| GET | `/projects` | any | Role-scoped list; optional `status` (one or more), `q`, `reviewerId`, `sort` (`LATEST`, `OLDEST`, `TITLE`), `page`, `size`; the `X-Total-Count` header carries the number of matches |
+| GET | `/projects/summary` | any | Counts by status for the caller's projects, plus projects awaiting assignment for the coordinator |
+| GET | `/projects/{id}` | participant | Project detail with `allowedActions` |
+| PUT | `/projects/{id}/proposal` | student owner | Edit the open draft |
+| POST / GET | `/projects/{id}/proposals` | student owner / participant | Start the next version / list versions |
+| POST | `/projects/{id}/submit` | student owner | Submit or resubmit |
+| POST | `/projects/{id}/assign` | coordinator | Assign a faculty reviewer |
+| POST / GET | `/projects/{id}/reviews` | assigned faculty / participant | Record a decision / list reviews |
+| GET | `/projects/{id}/history` | participant | Timeline of versions, reviews and status changes |
 
 ## Project structure
 
 ```
 backend/src/main/java/com/prastav/
   common/     error model, exceptions, BaseEntity, Swagger config
-  auth/       users, JWT, security, seed data   (+ web/)
+  auth/       users, JWT, security, seed data             (+ web/)
   workflow/   State pattern engine: ProjectState, six states, factory, WorkflowService
-  project/    Project aggregate, access policy, history   (+ web/)
+  project/    Project aggregate, access policy, list query and specifications, counts, history (+ web/)
   proposal/   immutable versions, factory, draft editing  (+ web/)
   review/     review decisions as strategies               (+ web/)
   audit/      append-only audit log fed by domain events
-backend/src/main/resources/db/migration/V1__init.sql
-frontend/src/  api/ auth/ components/ pages/
-docs/          LLD.md, LLD.pdf, diagrams.md, INTERVIEW_PREP.md, uml/
+backend/src/main/resources/db/migration/   Flyway migrations
+frontend/
+  public/brand/          logo, logo mark, favicon
+  src/api/               Axios client, endpoints, DTO types
+  src/auth/              session context and route guard
+  src/assets/            illustrations and the single asset index
+  src/components/ui/     design system (Button, Input, Card, StatCard, StatusPill, DataTable, Modal, Toast, …)
+  src/components/        domain components (WorkflowRail, ReviewPanel, AssignReviewerPanel, ProposalFields, ErrorNote)
+  src/config/           brand, navigation, demo accounts
+  src/layouts/           AppShell (sidebar, top bar), AuthLayout
+  src/lib/               formatting, people helpers, list-parameter and debounce hooks
+  src/pages/             landing, auth, role homes, project list, wizard, project page, assign
+  src/router.tsx         routes and guards
+  tailwind.config.js     design tokens
 ```
 
-## Milestone 2 (designed, not implemented)
+## Documentation
 
-Notifications through a `NotificationChannel` strategy, version compare, reviewer reassignment, coordinator dashboard, audit-log viewer, list filters/search/pagination, Dockerfiles for backend and frontend, GitHub Actions CI and Testcontainers integration tests. Their design is in `docs/LLD.md` (tagged **[M2 Planned]**) and in the diagrams (grey, dashed, `<<M2>>`).
+| Document | Contents |
+| --- | --- |
+| [`docs/PRD.md`](docs/PRD.md) | Requirements and technical specification |
+| [`docs/LLD.md`](docs/LLD.md) | Low level design: architecture, class catalogue, schema, API contracts, frontend architecture, tests |
+| [`docs/diagrams.md`](docs/diagrams.md), [`docs/uml/`](docs/uml) | Mermaid and PlantUML diagrams |
+| [`docs/design/README.md`](docs/design/README.md) | Mockups, design tokens and UI components |
+| [`docs/design/ASSETS.md`](docs/design/ASSETS.md) | Every image, its size and where it is used |
+| [`docs/INTERVIEW_PREP.md`](docs/INTERVIEW_PREP.md) | Design walkthrough and change guide |
+
+## Tests
+
+```bash
+cd backend && mvn test                     # JUnit 5 + Mockito unit tests and MockMvc slice tests; no database needed
+cd frontend && npm run typecheck           # TypeScript type check
+cd frontend && npm run build               # type check and production build
+```
+
+Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery` and the audit listener. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters and the summary endpoint.
+
+## Design patterns
+
+| Pattern | Where |
+| --- | --- |
+| State | `ProjectState` and its six status classes |
+| Factory | `ProjectStateFactory`, `ProposalVersionFactory` |
+| Facade | `WorkflowService` |
+| Observer | domain events consumed by `AuditEventListener` |
+| Strategy | `ReviewDecisionHandler` and its three decision handlers |
+| Specification | `ProjectSpecifications` for the filtered project list |
+| Repository | Spring Data repositories per module |
+| Builder | `AuditLog.Builder` |
+| DTO and mapper | `*Request` / `*Response` records with `*Mapper` classes |
+
+## Five-minute demo
+
+1. Sign in as **aarav@prastav.edu**, create a project in the wizard, fill every step, then **Submit proposal**.
+2. Sign in as **coordinator@prastav.edu**, open **Assign Faculty**, choose **Dr. Anita Rao** for the project.
+3. Sign in as **anita.rao@prastav.edu**, open the project from **Awaiting your review**, choose **Request changes**, write a comment and **Record decision**.
+4. As the student: read the feedback, **Start version 2**, edit it with the feedback panel open, then **Resubmit v2**. The Versions tab shows v1 unchanged.
+5. As the faculty member: **Approve**.
+6. In Swagger: `GET /api/projects/{id}/history` shows every step; `POST /api/projects/{id}/reviews` with `{"decision":"APPROVE"}` on a project that is only SUBMITTED returns **409 ILLEGAL_TRANSITION**.
 
 ## Troubleshooting
 
 - **Backend fails at startup with a connection error**: PostgreSQL is not running; check `docker compose ps`.
 - **Port 5432 already in use**: stop the local PostgreSQL or change the left side of the port mapping and `DB_URL`.
-- **"Flyway validate failed" after editing V1**: never edit an applied migration; add `V2__...sql`, or for a throwaway demo database run `docker compose down -v`.
-- **UI says the server is not reachable**: the backend is not on port 8080; Vite proxies `/api` there.
-- **401 after an hour**: the JWT expired; sign in again.
+- **"Flyway validate failed" after editing a migration**: never edit an applied migration; add a new `V<n>__...sql`, or for a throwaway demo database run `docker compose down -v`.
+- **The web app says the server is not reachable**: the backend is not on port 8080; Vite proxies `/api` there.
+- **Signed out after an hour**: the JWT expired; sign in again.

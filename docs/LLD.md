@@ -9,7 +9,7 @@
 | Date | 19 October 2026 |
 | Repository | `prastav` (artifacts `prastav-backend`, `prastav-frontend`) |
 | Base package | `com.prastav` |
-| Stack | Java 17, Spring Boot 3.3, Spring Security (JWT), Spring Data JPA, Flyway, PostgreSQL 16; React 18 + TypeScript, Vite, TanStack Query, Axios |
+| Stack | Java 17, Spring Boot 3.3, Spring Security (JWT), Spring Data JPA, Flyway, PostgreSQL 16; React 18 + TypeScript, Vite, React Router, TanStack Query, Axios, Tailwind CSS |
 
 ## 0. How to read this document
 
@@ -2113,6 +2113,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | Facade | `WorkflowService` | One simple API over states, persistence and events; every transition takes the same audited path |
 | Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener`; [M2] `NotificationListener` | Side effects decoupled from the workflow |
 | Strategy | `ReviewDecisionHandler` + `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`; [M2] `NotificationChannel` + `InAppNotificationChannel`, `EmailNotificationChannel` | Add a decision or channel by adding a class |
+| Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects` | One composable query for every list filter instead of a repository method per combination |
 | Repository | `UserRepository`, `ProjectRepository`, `ProposalVersionRepository`, `ReviewRepository`, `AuditLogRepository` | Persistence abstraction (Spring Data JPA) |
 | Builder | `AuditLog.builder()` / `AuditLog.Builder` | Readable construction with optional fields |
 | DTO + Mapper | `*Request`/`*Response` records, `UserMapper`, `ProjectMapper`, `ProposalMapper`, `ReviewMapper` | Entities never leave the service layer as JSON |
@@ -2233,3 +2234,53 @@ PlantUML sources are in `docs/uml/*.puml` (shared style `_style.iuml`), rendered
 ### Sequence: [M2 Planned] notification
 
 ![M2 notification flow](uml/png/09_seq_m2_notification.png)
+
+## 18. Frontend architecture
+
+The web app (`frontend/`, artifact `prastav-frontend`) is a React 18 + TypeScript single-page app built with Vite. Styling is Tailwind CSS 3 with the design tokens in `tailwind.config.js` (documented in `docs/design/README.md`); icons come from lucide-react and the Plus Jakarta Sans font is self-hosted.
+
+### 18.1 Routing and guards
+
+`src/router.tsx` defines one `createBrowserRouter` tree (a data router, which the wizard needs for `useBlocker`).
+
+| Route | Element | Guard |
+|---|---|---|
+| `/` | `LandingPage` (redirects a signed-in user to `/app`) | none |
+| `/login`, `/register` | `LoginPage`, `RegisterPage` inside `AuthLayout` | none (a signed-in user is redirected) |
+| `/app` | `AppShell` with `HomePage` (`StudentHome`, `FacultyHome` or `CoordinatorHome`) | `RequireAuth` |
+| `/app/projects` | `ProjectsPage` configured by role (My, Assigned or All Projects) | `RequireAuth` |
+| `/app/projects/new`, `/app/projects/:id/edit` | `ProjectWizardPage` | `RequireAuth roles=[STUDENT]` |
+| `/app/projects/:id` | `ProjectDetailPage` | `RequireAuth` (the API enforces participation) |
+| `/app/reviews` | `ProjectsPage mode="reviews"` (Under Review, oldest first) | `RequireAuth roles=[FACULTY, COORDINATOR]` |
+| `/app/assign` | `AssignPage` (Submitted projects) | `RequireAuth roles=[COORDINATOR]` |
+
+`RequireAuth` sends an anonymous visitor to `/login` with the requested path in the navigation state, so signing in returns there; a wrong role goes to `/app`. Route guards only shape navigation: every rule is enforced again by the API.
+
+### 18.2 Layouts and component structure
+
+| Folder | Contents |
+|---|---|
+| `src/layouts/` | `AppShell`: sidebar with role navigation from `config/navigation.ts` (a drawer below the `lg` breakpoint), top bar with global search (navigates to `/app/projects?q=`) and the account menu; `AuthLayout`: split layout for sign in and registration |
+| `src/components/ui/` | Design system: `Button`, `Input`/`Textarea`/`Select`, `Card`, `StatCard`, `StatusPill`, `Avatar`/`AvatarStack`, `DataTable`, `Pagination`, `FilterBar`, `Tabs`, `Stepper`, `DropdownMenu`, `Modal`, `ToastProvider`, `Skeleton`, `EmptyState`, `PageHeader`, `CtaBand`, `Logo` |
+| `src/components/` | Domain components: `WorkflowRail`, `ReviewPanel`, `AssignReviewerPanel`, `ProposalFields`/`ProposalView`, `ErrorNote`, and the label maps in `labels.ts` |
+| `src/pages/` | One file per screen; `pages/home/` holds the role homes and `pages/projects/` the shared table columns and the assign dialog |
+| `src/config/` | `brand.ts` (product name, tagline, institution), `navigation.ts`, `demoAccounts.ts` |
+| `src/assets/` | Illustrations and `index.ts`, the single place every image is referenced |
+| `src/lib/` | Formatting, people helpers (initials, avatar colour, team parsing), `useProjectListParams`, `useDebouncedValue`, `useDocumentTitle` |
+
+### 18.3 Data flow
+
+- `src/api/client.ts` is the Axios instance. It adds the Bearer token from the stored session, clears the session and returns to `/login` on a 401, and turns any error into one readable sentence (`errorMessage`) or per-field messages (`fieldErrors`). The session is kept in `localStorage` when "Remember me" is ticked and in `sessionStorage` otherwise.
+- `src/api/endpoints.ts` has one function per endpoint and `src/api/types.ts` mirrors the backend DTOs. `listProjects` returns `{ items, total }`, taking `total` from the `X-Total-Count` header.
+- Server state lives in TanStack Query. Keys start with `['projects']` for lists and counts, `['project', id]`, `['versions', id]`, `['reviews', id]` and `['history', id]` for one project. Every mutation invalidates the keys it affects, so lists, dashboards and the project page stay in step.
+- List filters (`status`, `q`, `reviewerId`, `sort`, `page`) live in the URL through `useProjectListParams`, so a filtered list can be shared; the search box updates the URL after a 300 ms pause and paging keeps the previous page on screen while the next one loads.
+- Buttons for workflow actions come only from `allowedActions` in `ProjectDetailResponse`. List rows, which carry no `allowedActions`, only offer shortcuts that the target page checks again (for example "Edit draft" for a DRAFT row opens the wizard, which shows "Nothing to edit" if the draft is gone).
+
+### 18.4 Wizard
+
+`ProjectWizardPage` writes a proposal in four steps: Basic Info, Problem and Objectives, Methodology and Outcomes, Timeline and Review. Next validates the current step; Save draft works at every step and creates the project on the first save (`POST /api/projects`), then updates the open draft (`PUT /api/projects/{id}/proposal`). Project details (title, description, tech stack, team) are read-only when editing because the API has no endpoint to change them. Submit opens a confirmation dialog, saves, then calls `POST /api/projects/{id}/submit`. For a project in REVISION_REQUESTED the same page shows a "Revision v{n}" banner and the reviewer's latest feedback in a collapsible side panel. Leaving with unsaved changes asks for confirmation (`useBlocker` and `beforeunload`).
+
+### 18.5 States and accessibility
+
+Every data view has a loading skeleton, an empty state and an error with Retry; successful actions show a toast. Inputs are labelled, errors are announced (`role="alert"`, live regions for toasts and counters), menus, tabs, the stepper and dialogs are keyboard operable with visible focus, and animations respect `prefers-reduced-motion`. The layout is designed at 1440px and works down to 360px: the sidebar becomes a drawer and tables scroll sideways.
+
