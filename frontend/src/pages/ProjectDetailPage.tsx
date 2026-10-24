@@ -109,7 +109,7 @@ export function ProjectDetailPage() {
               </button>
             </div>
           )}
-          {allowed.includes('ASSIGN_REVIEWER') && <AssignReviewerPanel projectId={id} />}
+          {allowed.includes('ASSIGN_REVIEWER') && <AssignReviewerPanel projectId={id} projectTitle={p.title} />}
           {reviewActions.length > 0 && (
             <ReviewPanel projectId={id} allowed={reviewActions} versionNumber={p.latestSubmittedVersion} />
           )}

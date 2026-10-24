@@ -34,7 +34,7 @@ export function StatCard({ label, value, icon, tone = 'teal', hint, loading, to 
         {icon}
       </IconTile>
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-muted">{label}</p>
+        <p className="text-sm font-medium leading-tight text-muted">{label}</p>
         {loading ? <Skeleton className="mt-2 h-8 w-12" /> : <p className="mt-1 text-3xl font-bold tabular-nums text-ink">{value ?? 0}</p>}
         {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
       </div>

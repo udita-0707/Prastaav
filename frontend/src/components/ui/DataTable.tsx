@@ -20,14 +20,16 @@ interface DataTableProps<T> {
   caption: string;
   /** Limits the height so the sticky header has something to stick to. */
   maxHeight?: string;
+  /** Below this width the table scrolls sideways instead of squeezing columns. */
+  minWidth?: string;
 }
 
 /** Sticky header, horizontal scroll on narrow screens, skeleton rows while loading. */
-export function DataTable<T>({ columns, rows, rowKey, loading, empty, caption, maxHeight }: DataTableProps<T>) {
+export function DataTable<T>({ columns, rows, rowKey, loading, empty, caption, maxHeight, minWidth = '720px' }: DataTableProps<T>) {
   if (!loading && rows && rows.length === 0 && empty) return <>{empty}</>;
   return (
     <div className="overflow-auto rounded-xl border border-line/80" style={maxHeight ? { maxHeight } : undefined}>
-      <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+      <table className="w-full border-collapse text-left text-sm" style={{ minWidth }}>
         <caption className="sr-only">{caption}</caption>
         <thead className="sticky top-0 z-10 bg-slate-50/95 backdrop-blur">
           <tr>

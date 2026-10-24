@@ -1,7 +1,8 @@
 import { useAuth } from '../auth/AuthContext';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
+import { CoordinatorHome } from './home/CoordinatorHome';
+import { FacultyHome } from './home/FacultyHome';
 import { StudentHome } from './home/StudentHome';
-import { ProjectsPage } from './ProjectsPage';
 
 /** /app: each role gets its own home. */
 export function HomePage() {
@@ -11,7 +12,9 @@ export function HomePage() {
   switch (user.role) {
     case 'STUDENT':
       return <StudentHome user={user} />;
-    default:
-      return <ProjectsPage />;
+    case 'FACULTY':
+      return <FacultyHome user={user} />;
+    case 'COORDINATOR':
+      return <CoordinatorHome user={user} />;
   }
 }
