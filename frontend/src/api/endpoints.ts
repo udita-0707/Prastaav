@@ -1,0 +1,51 @@
+import { api } from './client';
+import type {
+  AuthResponse,
+  CreateProjectRequest,
+  ProjectDetailResponse,
+  ProjectSummaryResponse,
+  ProposalContent,
+  ProposalVersionResponse,
+  ReviewRequest,
+  ReviewResponse,
+  Role,
+  UserResponse,
+} from './types';
+
+export const login = (email: string, password: string) =>
+  api.post<AuthResponse>('/auth/login', { email, password }).then((r) => r.data);
+
+export const register = (name: string, email: string, password: string, role: Role) =>
+  api.post<AuthResponse>('/auth/register', { name, email, password, role }).then((r) => r.data);
+
+export const listFaculty = () =>
+  api.get<UserResponse[]>('/users', { params: { role: 'FACULTY' } }).then((r) => r.data);
+
+export const listProjects = () => api.get<ProjectSummaryResponse[]>('/projects').then((r) => r.data);
+
+export const getProject = (id: string) =>
+  api.get<ProjectDetailResponse>(`/projects/${id}`).then((r) => r.data);
+
+export const createProject = (body: CreateProjectRequest) =>
+  api.post<ProjectDetailResponse>('/projects', body).then((r) => r.data);
+
+export const updateDraft = (projectId: string, content: ProposalContent) =>
+  api.put<ProposalVersionResponse>(`/projects/${projectId}/proposal`, content).then((r) => r.data);
+
+export const createNextVersion = (projectId: string) =>
+  api.post<ProposalVersionResponse>(`/projects/${projectId}/proposals`).then((r) => r.data);
+
+export const listVersions = (projectId: string) =>
+  api.get<ProposalVersionResponse[]>(`/projects/${projectId}/proposals`).then((r) => r.data);
+
+export const submitProject = (projectId: string) =>
+  api.post<ProjectDetailResponse>(`/projects/${projectId}/submit`).then((r) => r.data);
+
+export const assignReviewer = (projectId: string, facultyId: string) =>
+  api.post<ProjectDetailResponse>(`/projects/${projectId}/assign`, { facultyId }).then((r) => r.data);
+
+export const recordReview = (projectId: string, body: ReviewRequest) =>
+  api.post<ReviewResponse>(`/projects/${projectId}/reviews`, body).then((r) => r.data);
+
+export const listReviews = (projectId: string) =>
+  api.get<ReviewResponse[]>(`/projects/${projectId}/reviews`).then((r) => r.data);
