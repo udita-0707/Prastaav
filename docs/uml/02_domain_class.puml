@@ -1,0 +1,159 @@
+@startuml 02_domain_class
+!include _style.iuml
+title Prastav - Domain model (entities and value types)
+hide empty members
+
+abstract class BaseEntity {
+  - id : UUID
+  - createdAt : Instant
+  - newEntity : boolean
+  + getId() : UUID
+  + isNew() : boolean
+}
+
+class User {
+  - name : String
+  - email : String
+  - passwordHash : String
+  - role : Role
+  + toActor() : Actor
+}
+
+enum Role {
+  STUDENT
+  FACULTY
+  COORDINATOR
+}
+
+class Project {
+  - title : String
+  - description : String
+  - techStack : String
+  - teamMembers : String
+  - owner : User
+  - reviewer : User
+  - status : ProjectStatus
+  - version : Long
+  - updatedAt : Instant
+  + moveTo(next : ProjectStatus)
+  + assignReviewer(faculty : User)
+  + isOwnedBy(userId : UUID) : boolean
+  + isReviewedBy(userId : UUID) : boolean
+}
+
+enum ProjectStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  REVISION_REQUESTED
+  APPROVED
+  REJECTED
+  + isTerminal() : boolean
+}
+
+class ProposalVersion {
+  - project : Project
+  - versionNumber : int
+  - problemStatement : String
+  - objectives : String
+  - methodology : String
+  - expectedOutcome : String
+  - timeline : String
+  - referenceLink : String
+  - state : ProposalVersionState
+  - submittedAt : Instant
+  - createdBy : UUID
+  + updateContent(content : ProposalContent)
+  + submit()
+  + isDraft() : boolean
+  + missingFields() : List<String>
+  + isComplete() : boolean
+  + content() : ProposalContent
+}
+
+enum ProposalVersionState {
+  DRAFT
+  SUBMITTED
+}
+
+class ProposalContent <<record>> {
+  problemStatement : String
+  objectives : String
+  methodology : String
+  expectedOutcome : String
+  timeline : String
+  referenceLink : String
+  + {static} empty() : ProposalContent
+}
+
+class Review {
+  - project : Project
+  - proposalVersion : ProposalVersion
+  - reviewer : User
+  - decision : ReviewDecision
+  - comments : String
+}
+
+enum ReviewDecision {
+  APPROVE
+  REQUEST_REVISION
+  REJECT
+}
+
+class AuditLog {
+  - projectId : UUID
+  - actorId : UUID
+  - action : AuditAction
+  - fromStatus : ProjectStatus
+  - toStatus : ProjectStatus
+  - details : String
+  + {static} builder() : AuditLog.Builder
+}
+
+enum AuditAction {
+  PROJECT_CREATED
+  VERSION_CREATED
+  DRAFT_UPDATED
+  PROPOSAL_SUBMITTED
+  REVIEWER_ASSIGNED
+  REVIEW_RECORDED
+  STATUS_CHANGED
+}
+
+class Notification <<M2>> {
+  - user : User
+  - projectId : UUID
+  - type : NotificationType
+  - message : String
+  - read : boolean
+  + markRead()
+}
+
+enum NotificationType <<M2>> {
+  REVIEWER_ASSIGNED
+  REVIEW_DECISION
+  RESUBMITTED
+}
+
+BaseEntity <|-- User
+BaseEntity <|-- Project
+BaseEntity <|-- ProposalVersion
+BaseEntity <|-- Review
+BaseEntity <|-- AuditLog
+BaseEntity <|-- Notification
+
+User --> Role
+Project "*" --> "1" User : owner
+Project "*" --> "0..1" User : reviewer
+Project --> ProjectStatus
+Project "1" *-- "1..*" ProposalVersion : versions
+ProposalVersion --> ProposalVersionState
+ProposalVersion ..> ProposalContent : creates/reads
+ProposalVersion "1" -- "*" Review : reviewed in
+Review --> ReviewDecision
+Review "*" --> "1" User : reviewer
+AuditLog --> AuditAction
+AuditLog ..> Project : projectId
+Notification ..> User
+Notification --> NotificationType
+@enduml

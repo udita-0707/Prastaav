@@ -1,0 +1,27 @@
+@startuml 08_seq_illegal_transition
+!include _style.iuml
+title Sequence - Illegal transition rejected (faculty approves a SUBMITTED project)
+autonumber
+actor Faculty
+participant "ReviewController" as RC
+participant "ReviewService" as RS
+participant "ApproveDecisionHandler" as AH
+participant "WorkflowService" as WS
+participant "ProjectStateFactory" as PSF
+participant "SubmittedState" as SS
+participant "GlobalExceptionHandler" as GEH
+database PostgreSQL as DB
+
+Faculty -> RC : POST /api/projects/{id}/reviews {decision: APPROVE}
+RC -> RS : recordReview(id, APPROVE, null, null, actor)
+RS -> AH : apply(id, actor, null)
+AH -> WS : approve(id, actor)
+WS -> PSF : stateOf(SUBMITTED)
+PSF --> WS : SubmittedState
+WS -> SS : approve(project, actor)
+SS --> WS : throws IllegalTransitionException\n(SUBMITTED, APPROVE)\n(inherited default method)
+note over WS, DB : No save, no event, no review row:\nthe @Transactional method rolls back.
+WS --> RC : exception propagates
+RC -> GEH : handleBusiness(ex)
+GEH --> Faculty : 409 {code: ILLEGAL_TRANSITION,\nmessage: "Action APPROVE is not allowed\nwhile the project is SUBMITTED"}
+@enduml

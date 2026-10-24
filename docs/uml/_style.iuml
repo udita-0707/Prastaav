@@ -1,0 +1,39 @@
+' Shared style. Milestone 2 elements use the <<M2>> stereotype: grey fill, grey text, dashed border.
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam ArrowColor #34495E
+skinparam ClassBorderColor #2C3E50
+skinparam ClassBackgroundColor #FFFFFF
+skinparam ClassHeaderBackgroundColor #E8EEF8
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #B8A200
+skinparam PackageBorderColor #7F8C8D
+skinparam class {
+  BackgroundColor<<M2>> #EEEEEE
+  HeaderBackgroundColor<<M2>> #E0E0E0
+  BorderColor<<M2>> #9E9E9E
+  FontColor<<M2>> #757575
+  AttributeFontColor<<M2>> #757575
+  StereotypeFontColor<<M2>> #757575
+  BorderStyle<<M2>> dashed
+}
+skinparam usecase {
+  BackgroundColor<<M2>> #EEEEEE
+  BorderColor<<M2>> #9E9E9E
+  FontColor<<M2>> #757575
+  BorderStyle<<M2>> dashed
+}
+skinparam component {
+  BackgroundColor<<M2>> #EEEEEE
+  BorderColor<<M2>> #9E9E9E
+  FontColor<<M2>> #757575
+  BorderStyle<<M2>> dashed
+}
+skinparam entity {
+  BackgroundColor<<M2>> #EEEEEE
+  BorderColor<<M2>> #9E9E9E
+  FontColor<<M2>> #757575
+  BorderStyle<<M2>> dashed
+}
+skinparam legendBackgroundColor #FAFAFA

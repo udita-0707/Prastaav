@@ -1,0 +1,44 @@
+@startuml 05_seq_create_submit
+!include _style.iuml
+title Sequence - Student creates a project and submits v1
+autonumber
+actor Student
+participant "ProjectController" as PC
+participant "ProjectService" as PS
+participant "ProposalService" as PRS
+participant "ProposalVersionFactory" as PVF
+participant "WorkflowService" as WS
+participant "ProjectStateFactory" as PSF
+participant "DraftState" as DS
+participant "AuditEventListener" as AEL
+database PostgreSQL as DB
+
+Student -> PC : POST /api/projects {title, ..., proposal}
+PC -> PS : createProject(newProject, proposal, actor)
+PS -> DB : save(Project status=DRAFT)
+PS -> AEL : publish ProjectCreatedEvent
+AEL -> DB : insert audit PROJECT_CREATED
+PS -> PRS : createInitialDraft(project, content, actor)
+PRS -> PVF : initialDraft(project, content, userId)
+PVF --> PRS : ProposalVersion v1 (DRAFT)
+PRS -> DB : save(v1)
+PRS -> AEL : publish ProposalVersionCreatedEvent
+AEL -> DB : insert audit VERSION_CREATED
+PS --> PC : ProjectView (allowedActions = SUBMIT, EDIT_DRAFT)
+PC --> Student : 201 ProjectDetailResponse
+
+Student -> PC : POST /api/projects/{id}/submit
+PC -> WS : submit(id, actor)
+WS -> PRS : findOpenDraft(id)
+PRS --> WS : v1
+WS -> PSF : stateOf(DRAFT)
+PSF --> WS : DraftState
+WS -> DS : submit(project, actor, v1)
+DS -> DS : Guards.requireOwner / requireOpenDraft / requireComplete
+DS -> DS : v1.submit() (now immutable)\nproject.moveTo(SUBMITTED)
+WS -> DB : save(project) [@Version check]
+WS -> AEL : publish ProjectStatusChangedEvent(DRAFT -> SUBMITTED)
+AEL -> DB : insert audit PROPOSAL_SUBMITTED
+PC -> PS : getProject(id, actor)
+PC --> Student : 200 ProjectDetailResponse (status SUBMITTED)
+@enduml

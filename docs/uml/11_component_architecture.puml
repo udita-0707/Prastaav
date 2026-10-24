@@ -1,0 +1,58 @@
+@startuml 11_component_architecture
+!include _style.iuml
+title Prastav - Component / architecture (modular monolith)
+
+node "Browser" {
+  component "prastav-frontend\n(React + TS, Vite,\nTanStack Query, Axios)" as FE
+}
+
+node "prastav-backend (Spring Boot 3, Java 17)" {
+  component "Security\n(JwtAuthenticationFilter,\nSecurityConfig, @PreAuthorize)" as SEC
+  package "web layer" {
+    component "Controllers + DTO mappers\n(Auth, User, Project,\nProposal, Review)" as WEB
+    component "GlobalExceptionHandler" as GEH
+  }
+  package "modules" {
+    component "auth\n(UserService, AuthService, JwtService)" as AUTH
+    component "project\n(ProjectService, ProjectStore,\nProjectAccessPolicy, ProjectHistoryService)" as PROJ
+    component "proposal\n(ProposalService,\nProposalVersionFactory)" as PROP
+    component "review\n(ReviewService,\nReviewDecisionHandler x3)" as REV
+    component "workflow\n(WorkflowService, ProjectState x6,\nProjectStateFactory)" as WF
+    component "audit\n(AuditEventListener,\nAuditRecorder, AuditQueryService)" as AUD
+    component "notification" as NOTIF <<M2>>
+    component "dashboard" as DASH <<M2>>
+  }
+  component "Spring Data JPA repositories" as REPO
+  component "Flyway migrations" as FLY
+}
+
+database "PostgreSQL 16\n(docker-compose)" as DB
+component "Docker images +\nGitHub Actions CI" as CI <<M2>>
+
+FE --> SEC : REST + Bearer JWT\n(/api, proxied by Vite)
+SEC --> WEB
+WEB --> AUTH
+WEB --> PROJ
+WEB --> PROP
+WEB --> REV
+WEB --> WF
+REV --> WF : decision strategies
+PROJ --> PROP
+PROP --> WF : ProjectStateFactory\n(allowed actions)
+WF --> PROP : open draft
+WF ..> AUD : domain events (Observer)
+PROJ ..> AUD : events
+PROP ..> AUD : events
+REV ..> AUD : events
+WF ..> NOTIF : events
+NOTIF --> REPO
+DASH --> REPO
+AUTH --> REPO
+PROJ --> REPO
+PROP --> REPO
+REV --> REPO
+AUD --> REPO
+REPO --> DB
+FLY --> DB
+CI ..> FE
+@enduml

@@ -1,0 +1,127 @@
+@startuml 03_workflow_state_pattern
+!include _style.iuml
+title Prastav - Workflow engine (State + Factory + Facade)
+hide empty members
+
+interface ProjectState <<State>> {
+  + status() : ProjectStatus
+  + availableActions() : Set<Action>
+  + submit(project : Project, actor : Actor, draft : ProposalVersion)
+  + assignReviewer(project : Project, faculty : User, actor : Actor)
+  + approve(project : Project, actor : Actor)
+  + requestRevision(project : Project, actor : Actor, comments : String)
+  + reject(project : Project, actor : Actor, comments : String)
+}
+note right of ProjectState
+  Every method is a default method that
+  throws IllegalTransitionException.
+  A state overrides only its legal actions.
+end note
+
+class DraftState {
+  + submit(...)
+}
+class SubmittedState {
+  + assignReviewer(...)
+}
+class UnderReviewState {
+  + approve(...)
+  + requestRevision(...)
+  + reject(...)
+}
+class RevisionRequestedState {
+  + submit(...)
+}
+class ApprovedState
+class RejectedState
+
+ProjectState <|.. DraftState
+ProjectState <|.. SubmittedState
+ProjectState <|.. UnderReviewState
+ProjectState <|.. RevisionRequestedState
+ProjectState <|.. ApprovedState
+ProjectState <|.. RejectedState
+
+class ProjectStateFactory <<Factory>> {
+  - states : Map<ProjectStatus, ProjectState>
+  + ProjectStateFactory(stateBeans : List<ProjectState>)
+  + stateOf(status : ProjectStatus) : ProjectState
+}
+
+class WorkflowService <<Facade>> {
+  - projectStore : ProjectStore
+  - stateFactory : ProjectStateFactory
+  - proposalService : ProposalService
+  - userService : UserService
+  - events : ApplicationEventPublisher
+  + submit(projectId : UUID, actor : Actor) : Project
+  + assignReviewer(projectId : UUID, facultyId : UUID, actor : Actor) : Project
+  + approve(projectId : UUID, actor : Actor) : Project
+  + requestRevision(projectId : UUID, actor : Actor, comments : String) : Project
+  + reject(projectId : UUID, actor : Actor, comments : String) : Project
+  - transition(project, actor, action, step, details) : Project
+}
+
+class Guards <<utility>> {
+  + {static} requireOwner(project : Project, actor : Actor)
+  + {static} requireRole(actor : Actor, role : Role)
+  + {static} requireAssignedReviewer(project : Project, actor : Actor)
+  + {static} requireComments(comments : String, action : Action)
+  + {static} requireOpenDraft(draft : ProposalVersion)
+  + {static} requireComplete(draft : ProposalVersion)
+}
+
+class AllowedActionsResolver {
+  - stateFactory : ProjectStateFactory
+  + resolve(project : Project, actor : Actor, hasOpenDraft : boolean) : Set<Action>
+}
+
+enum Action {
+  SUBMIT
+  ASSIGN_REVIEWER
+  APPROVE
+  REQUEST_REVISION
+  REJECT
+  EDIT_DRAFT
+  CREATE_REVISION
+}
+
+class IllegalTransitionException {
+  - from : ProjectStatus
+  - action : Action
+}
+
+class ProjectStatusChangedEvent <<record>> {
+  projectId : UUID
+  actorId : UUID
+  action : Action
+  fromStatus : ProjectStatus
+  toStatus : ProjectStatus
+  details : Map<String, String>
+}
+
+class ProjectStore {
+  + getById(projectId : UUID) : Project
+  + save(project : Project) : Project
+}
+
+ProjectStateFactory o--> "6" ProjectState
+WorkflowService --> ProjectStateFactory
+WorkflowService --> ProjectStore
+WorkflowService ..> ProjectStatusChangedEvent : publishes
+AllowedActionsResolver --> ProjectStateFactory
+DraftState ..> Guards
+SubmittedState ..> Guards
+UnderReviewState ..> Guards
+RevisionRequestedState ..> Guards
+ProjectState ..> IllegalTransitionException : throws
+ProjectState ..> Action
+
+class "reassignReviewer" as Reassign <<M2>> {
+  ProjectState.reassignReviewer(project, faculty, actor)
+  UnderReviewState.reassignReviewer(...)
+  WorkflowService.reassignReviewer(projectId, facultyId, actor)
+  Action.REASSIGN_REVIEWER
+}
+Reassign .. UnderReviewState : <<M2>> adds
+@enduml

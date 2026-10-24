@@ -1,0 +1,83 @@
+@startuml 12_events_and_strategies
+!include _style.iuml
+title Prastav - Observer (domain events) and Strategy (review decisions, notification channels)
+hide empty members
+
+package "Observer: events" {
+  class ProjectCreatedEvent <<record>>
+  class ProposalVersionCreatedEvent <<record>>
+  class ProposalDraftUpdatedEvent <<record>>
+  class ProjectStatusChangedEvent <<record>>
+  class ReviewRecordedEvent <<record>>
+
+  class AuditEventListener {
+    - recorder : AuditRecorder
+    - objectMapper : ObjectMapper
+    + on(event : ProjectCreatedEvent)
+    + on(event : ProposalVersionCreatedEvent)
+    + on(event : ProposalDraftUpdatedEvent)
+    + on(event : ProjectStatusChangedEvent)
+    + on(event : ReviewRecordedEvent)
+  }
+  interface AuditRecorder {
+    + record(entry : AuditLog)
+  }
+  class JpaAuditRecorder
+  AuditRecorder <|.. JpaAuditRecorder
+  AuditEventListener --> AuditRecorder
+
+  class NotificationListener <<M2>> {
+    + on(event : ProjectStatusChangedEvent)
+  }
+  class NotificationService <<M2>> {
+    - channels : List<NotificationChannel>
+    + notify(user : User, type : NotificationType, message : String)
+  }
+  NotificationListener --> NotificationService
+}
+
+AuditEventListener ..> ProjectCreatedEvent
+AuditEventListener ..> ProposalVersionCreatedEvent
+AuditEventListener ..> ProposalDraftUpdatedEvent
+AuditEventListener ..> ProjectStatusChangedEvent
+AuditEventListener ..> ReviewRecordedEvent
+NotificationListener ..> ProjectStatusChangedEvent
+
+package "Strategy: review decisions" {
+  interface ReviewDecisionHandler {
+    + decision() : ReviewDecision
+    + apply(projectId : UUID, actor : Actor, comments : String)
+  }
+  class ApproveDecisionHandler
+  class RequestRevisionDecisionHandler
+  class RejectDecisionHandler
+  ReviewDecisionHandler <|.. ApproveDecisionHandler
+  ReviewDecisionHandler <|.. RequestRevisionDecisionHandler
+  ReviewDecisionHandler <|.. RejectDecisionHandler
+
+  class ReviewService {
+    - handlers : Map<ReviewDecision, ReviewDecisionHandler>
+    + recordReview(projectId, decision, comments, versionNumber, actor) : Review
+    + listReviews(projectId : UUID, actor : Actor) : List<Review>
+  }
+  ReviewService o--> ReviewDecisionHandler
+}
+
+class WorkflowService <<Facade>>
+ApproveDecisionHandler --> WorkflowService : approve()
+RequestRevisionDecisionHandler --> WorkflowService : requestRevision()
+RejectDecisionHandler --> WorkflowService : reject()
+ReviewService ..> ReviewRecordedEvent : publishes
+
+package "Strategy: notification channels" <<M2>> {
+  interface NotificationChannel <<M2>> {
+    + name() : String
+    + send(notification : Notification)
+  }
+  class InAppNotificationChannel <<M2>>
+  class EmailNotificationChannel <<M2>>
+  NotificationChannel <|.. InAppNotificationChannel
+  NotificationChannel <|.. EmailNotificationChannel
+}
+NotificationService o--> NotificationChannel
+@enduml

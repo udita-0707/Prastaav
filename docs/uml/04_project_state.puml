@@ -1,0 +1,25 @@
+@startuml 04_project_state
+!include _style.iuml
+title Prastav - Project status machine with guards
+hide empty description
+
+[*] --> DRAFT : ProjectService.createProject\n(student; v1 draft created)
+DRAFT --> SUBMITTED : submit\n[actor is owner; open draft;\nrequired fields filled]
+SUBMITTED --> UNDER_REVIEW : assignReviewer\n[actor is COORDINATOR;\nassignee has FACULTY role]
+UNDER_REVIEW --> APPROVED : approve\n[actor is assigned faculty]
+UNDER_REVIEW --> REVISION_REQUESTED : requestRevision\n[assigned faculty;\ncomments mandatory]
+UNDER_REVIEW --> REJECTED : reject\n[assigned faculty;\ncomments mandatory]
+REVISION_REQUESTED --> UNDER_REVIEW : submit (resubmit)\n[owner; new version vN+1 open and complete;\nreviewer already assigned]
+UNDER_REVIEW -[#9E9E9E,dashed]-> UNDER_REVIEW : <<M2>> reassignReviewer\n[COORDINATOR; new assignee FACULTY]
+APPROVED --> [*]
+REJECTED --> [*]
+
+state DRAFT : allowed: SUBMIT, EDIT_DRAFT
+state SUBMITTED : allowed: ASSIGN_REVIEWER
+state UNDER_REVIEW : allowed: APPROVE, REQUEST_REVISION, REJECT
+state REVISION_REQUESTED : allowed: CREATE_REVISION, EDIT_DRAFT, SUBMIT
+state APPROVED : terminal
+state REJECTED : terminal
+
+note "Any action not on an arrow throws\nIllegalTransitionException (HTTP 409 ILLEGAL_TRANSITION).\nGuard failures: 403 FORBIDDEN (who),\n400 VALIDATION_FAILED (comments, fields),\n409 (no open draft)." as N1
+@enduml

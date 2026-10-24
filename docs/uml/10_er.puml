@@ -1,0 +1,100 @@
+@startuml 10_er
+!include _style.iuml
+title Prastav - ER diagram (Flyway V1__init.sql; notifications is <<M2>>)
+hide circle
+skinparam linetype ortho
+
+entity users {
+  * id : UUID <<PK>>
+  --
+  * name : VARCHAR(120)
+  * email : VARCHAR(255) <<UNIQUE>>
+  * password_hash : VARCHAR(100)
+  * role : VARCHAR(20) <<CHECK>>
+  * created_at : TIMESTAMPTZ
+}
+
+entity projects {
+  * id : UUID <<PK>>
+  --
+  * title : VARCHAR(200)
+  * description : TEXT
+  tech_stack : VARCHAR(500)
+  team_members : TEXT
+  * owner_id : UUID <<FK users>>
+  reviewer_id : UUID <<FK users>>
+  * status : VARCHAR(30) <<CHECK>>
+  * version : BIGINT (optimistic lock)
+  * created_at : TIMESTAMPTZ
+  * updated_at : TIMESTAMPTZ
+}
+
+entity proposal_versions {
+  * id : UUID <<PK>>
+  --
+  * project_id : UUID <<FK projects>>
+  * version_number : INTEGER
+  problem_statement : TEXT
+  objectives : TEXT
+  methodology : TEXT
+  expected_outcome : TEXT
+  timeline : TEXT
+  reference_link : VARCHAR(500)
+  * state : VARCHAR(20) <<CHECK>>
+  submitted_at : TIMESTAMPTZ
+  * created_by : UUID <<FK users>>
+  * created_at : TIMESTAMPTZ
+  ..
+  UNIQUE (project_id, version_number)
+  UNIQUE (project_id) WHERE state = 'DRAFT'
+  trigger: no UPDATE/DELETE when SUBMITTED
+}
+
+entity reviews {
+  * id : UUID <<PK>>
+  --
+  * project_id : UUID <<FK projects>>
+  * proposal_version_id : UUID <<FK proposal_versions>>
+  * reviewer_id : UUID <<FK users>>
+  * decision : VARCHAR(30) <<CHECK>>
+  comments : TEXT
+  * created_at : TIMESTAMPTZ
+  ..
+  CHECK comments required unless APPROVE
+}
+
+entity audit_logs {
+  * id : UUID <<PK>>
+  --
+  project_id : UUID <<FK projects>>
+  * actor_id : UUID <<FK users>>
+  * action : VARCHAR(40)
+  from_status : VARCHAR(30)
+  to_status : VARCHAR(30)
+  details : TEXT (JSON)
+  * created_at : TIMESTAMPTZ
+  ..
+  trigger: append-only
+}
+
+entity notifications <<M2>> {
+  * id : UUID <<PK>>
+  --
+  * user_id : UUID <<FK users>>
+  project_id : UUID <<FK projects>>
+  * type : VARCHAR(30)
+  * message : TEXT
+  * is_read : BOOLEAN
+  * created_at : TIMESTAMPTZ
+}
+
+users ||--o{ projects : owns
+users |o--o{ projects : reviews
+projects ||--|{ proposal_versions : has
+proposal_versions ||--o{ reviews : reviewed in
+projects ||--o{ reviews : has
+users ||--o{ reviews : writes
+projects |o--o{ audit_logs : logged in
+users ||--o{ audit_logs : acts in
+users ||..o{ notifications : <<M2>>
+@enduml

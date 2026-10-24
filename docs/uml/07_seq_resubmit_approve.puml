@@ -1,0 +1,45 @@
+@startuml 07_seq_resubmit_approve
+!include _style.iuml
+title Sequence - Student revises (v2), resubmits; faculty approves
+autonumber
+actor Student
+actor Faculty
+participant "ProposalController" as PRC
+participant "ProposalService" as PRS
+participant "ProposalVersionFactory" as PVF
+participant "ProjectController" as PC
+participant "WorkflowService" as WS
+participant "RevisionRequestedState" as RRS
+participant "ReviewService" as RS
+participant "ApproveDecisionHandler" as AH
+participant "UnderReviewState" as URS
+database PostgreSQL as DB
+
+Student -> PRC : POST /api/projects/{id}/proposals
+PRC -> PRS : createNextVersion(id, actor)
+PRS -> PRS : requireOwner; state allows CREATE_REVISION;\nno open draft
+PRS -> PVF : nextDraftFrom(v1, userId)
+PVF --> PRS : v2 (DRAFT, copy of v1 content)
+PRS -> DB : save(v2)   (v1 row untouched)
+PRC --> Student : 201 ProposalVersionResponse v2
+
+Student -> PRC : PUT /api/projects/{id}/proposal {edited fields}
+PRC -> PRS : updateDraft(id, content, actor)
+PRS -> DB : save(v2)
+
+Student -> PC : POST /api/projects/{id}/submit
+PC -> WS : submit(id, actor)
+WS -> RRS : submit(project, actor, v2)
+RRS -> RRS : requireOwner, requireOpenDraft, requireComplete,\nreviewer != null
+RRS -> RRS : v2.submit(); project.moveTo(UNDER_REVIEW)
+WS -> DB : save(project); audit PROPOSAL_SUBMITTED
+PC --> Student : 200 (UNDER_REVIEW, same reviewer)
+
+Faculty -> RS : recordReview(id, APPROVE, null, 2, actor)
+RS -> AH : apply(id, actor, null)
+AH -> WS : approve(id, actor)
+WS -> URS : approve(project, actor)
+URS -> URS : Guards.requireAssignedReviewer\nproject.moveTo(APPROVED)
+WS -> DB : save(project); audit STATUS_CHANGED
+RS -> DB : save(Review -> v2); audit REVIEW_RECORDED
+@enduml

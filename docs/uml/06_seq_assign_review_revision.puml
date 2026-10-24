@@ -1,0 +1,43 @@
+@startuml 06_seq_assign_review_revision
+!include _style.iuml
+title Sequence - Coordinator assigns, faculty requests a revision
+autonumber
+actor Coordinator
+actor Faculty
+participant "ProjectController" as PC
+participant "ReviewController" as RC
+participant "WorkflowService" as WS
+participant "SubmittedState" as SS
+participant "ReviewService" as RS
+participant "RequestRevisionDecisionHandler" as RH
+participant "UnderReviewState" as URS
+participant "AuditEventListener" as AEL
+database PostgreSQL as DB
+
+Coordinator -> PC : POST /api/projects/{id}/assign {facultyId}
+PC -> WS : assignReviewer(id, facultyId, actor)
+WS -> WS : userService.getById(facultyId)
+WS -> SS : assignReviewer(project, faculty, actor)
+SS -> SS : Guards.requireRole(COORDINATOR)\nfaculty.role == FACULTY
+SS -> SS : project.assignReviewer(faculty)\nproject.moveTo(UNDER_REVIEW)
+WS -> DB : save(project)
+WS -> AEL : ProjectStatusChangedEvent(SUBMITTED -> UNDER_REVIEW)
+AEL -> DB : insert audit REVIEWER_ASSIGNED
+PC --> Coordinator : 200 (status UNDER_REVIEW)
+
+Faculty -> RC : POST /api/projects/{id}/reviews\n{decision: REQUEST_REVISION, comments, versionNumber: 1}
+RC -> RS : recordReview(id, REQUEST_REVISION, comments, 1, actor)
+RS -> RS : latest = proposalService.findLatestSubmitted(id)\ncheck versionNumber == latest
+RS -> RH : apply(id, actor, comments)
+RH -> WS : requestRevision(id, actor, comments)
+WS -> URS : requestRevision(project, actor, comments)
+URS -> URS : Guards.requireAssignedReviewer\nGuards.requireComments
+URS -> URS : project.moveTo(REVISION_REQUESTED)
+WS -> DB : save(project)
+WS -> AEL : ProjectStatusChangedEvent(UNDER_REVIEW -> REVISION_REQUESTED)
+AEL -> DB : insert audit STATUS_CHANGED
+RS -> DB : save(Review -> v1)
+RS -> AEL : ReviewRecordedEvent
+AEL -> DB : insert audit REVIEW_RECORDED
+RC --> Faculty : 201 ReviewResponse
+@enduml
