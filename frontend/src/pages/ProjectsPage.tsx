@@ -22,7 +22,7 @@ const EMPTY: Record<Role, string> = {
 
 export function ProjectsPage() {
   const { user } = useAuth();
-  const projects = useQuery({ queryKey: ['projects'], queryFn: listProjects });
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => listProjects().then((page) => page.items) });
   if (!user) return null;
 
   return (

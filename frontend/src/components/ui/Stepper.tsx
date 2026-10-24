@@ -14,7 +14,7 @@ export function Stepper({ steps, current, onStepClick }: StepperProps) {
     <nav aria-label="Progress">
       <ol className="flex flex-wrap items-center gap-x-3 gap-y-3">
         {steps.map((label, index) => {
-          const state = index < current ? 'done' : index === current ? 'current' : 'todo';
+          const state = index < current ? 'done' : index === current ? 'current' : 'pending';
           const marker = (
             <>
               <span
@@ -22,7 +22,7 @@ export function Stepper({ steps, current, onStepClick }: StepperProps) {
                   'flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold transition-colors',
                   state === 'done' && 'bg-brand-100 text-brand-700',
                   state === 'current' && 'bg-brand-600 text-white shadow-focus',
-                  state === 'todo' && 'bg-slate-100 text-slate-500',
+                  state === 'pending' && 'bg-slate-100 text-slate-500',
                 )}
                 aria-hidden
               >

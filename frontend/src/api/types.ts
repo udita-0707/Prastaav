@@ -59,10 +59,38 @@ export interface ProposalVersionResponse extends ProposalContent {
 export interface ProjectSummaryResponse {
   id: string;
   title: string;
+  description: string;
+  teamMembers: string | null;
   status: ProjectStatus;
   owner: UserSummary;
   reviewer: UserSummary | null;
+  /** First submission of the proposal; null while never submitted. */
+  submittedAt: string | null;
   updatedAt: string;
+}
+
+export type ProjectSort = 'LATEST' | 'OLDEST' | 'TITLE';
+
+/** Query parameters of GET /api/projects. All optional; without page the whole list is returned. */
+export interface ProjectListParams {
+  status?: ProjectStatus[];
+  q?: string;
+  reviewerId?: string;
+  sort?: ProjectSort;
+  page?: number;
+  size?: number;
+}
+
+export interface ProjectPage {
+  items: ProjectSummaryResponse[];
+  /** From the X-Total-Count header: matches across all pages. */
+  total: number;
+}
+
+export interface ProjectCountsResponse {
+  total: number;
+  byStatus: Record<ProjectStatus, number>;
+  awaitingAssignment: number | null;
 }
 
 export interface ProjectDetailResponse {
