@@ -1,4 +1,4 @@
-# Prastav
+# Prastaav
 
 Academic project workflow and approval system: students submit structured project proposals, a coordinator assigns a faculty reviewer, and the reviewer approves, requests a revision or rejects. Every submitted version is immutable and every action is audited.
 
