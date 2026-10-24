@@ -66,10 +66,10 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-9 | Invalid transitions rejected with clear error | M1 | [M1 Implemented] | `ProjectState` default methods, `IllegalTransitionException`, `GlobalExceptionHandler` (409) |
 | FR-10 | Audit log for every state change, assignment, submission, review | M1 | [M1 Implemented] | `AuditEventListener`, `AuditLog`, append-only trigger |
 | FR-11 | Project timeline | M1 API / M2 UI | API [M1 Implemented]; UI tab [M2 Planned] | `ProjectHistoryService`, `GET /api/projects/{id}/history` |
-| FR-12 | Role-scoped lists with status filter, search, pagination | M2 | Role scoping [M1 Implemented]; filter/search/page [M2 Planned] | `ProjectService.listProjects`; planned `ProjectSearchCriteria`, `ProjectSpecifications` |
+| FR-12 | Role-scoped lists with status filter, search, pagination | — | Implemented | `ProjectService.listProjects`, `ProjectListQuery`, `ProjectSpecifications`, `GET /api/projects?status=&q=&reviewerId=&sort=&page=&size=` |
 | FR-13 | In-app notifications | M2 | [M2 Planned] | `NotificationListener`, `NotificationService`, `NotificationChannel` |
 | FR-14 | Compare two versions (field diff) | M2 | [M2 Planned] | `VersionCompareService`, `VersionComparison`, `FieldDiff` |
-| FR-15 | Coordinator dashboard | M2 | [M2 Planned] | `DashboardService`, `DashboardController`, `DashboardSummary` |
+| FR-15 | Coordinator dashboard | — | Implemented as role dashboards: counts per status and projects awaiting assignment | `ProjectService.countProjects`, `GET /api/projects/summary`, web app home pages |
 | FR-16 | Audit-log viewer with filters | M2 | [M2 Planned] | `AuditController`, `AuditLogFilter`, `AuditLogResponse` |
 | FR-17 | Reassign reviewer with audit entry | M2 | [M2 Planned] | `WorkflowService.reassignReviewer`, `UnderReviewState.reassignReviewer` |
 
@@ -82,8 +82,8 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | Optimistic locking on `Project` | [M1 Implemented] | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | [M1 Implemented] | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | [M1 Implemented] | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning | [M1 Implemented] | 60 tests in `backend/src/test/java` (see section 16) |
-| MockMvc tests (401 / 403 / 409 mapping) | [M1 Implemented] | `ProjectControllerWebTest` (3 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts | Implemented | 73 tests in `backend/src/test/java` (see section 16) |
+| MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints) | Implemented | `ProjectControllerWebTest` (6 tests) |
 | React UI for three roles | [M1 Implemented] | `frontend/src` |
 | PostgreSQL via docker-compose | [M1 Implemented] | `docker-compose.yml` (database only) |
 | Backend/frontend Dockerfiles, compose for whole stack | [M2 Planned] | section 15.3 |
@@ -984,6 +984,14 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 - `public void requireOwner(Project project, Actor actor)`
 - `public void requireRole(Actor actor, Role role)`
 
+#### `ProjectCounts`
+
+*record* · `src/main/java/com/prastav/project/ProjectCounts.java`
+
+**Responsibility.** Role-scoped project counts for the dashboards. byStatus always has an entry for every status. awaitingAssignment is only filled for the coordinator: submitted projects that still need a reviewer.
+
+**Components:** `long total, Map<ProjectStatus, Long> byStatus, Long awaitingAssignment`
+
 #### `ProjectCreatedEvent` [M1 Implemented]
 
 *record* · `src/main/java/com/prastav/project/ProjectCreatedEvent.java`
@@ -1012,17 +1020,51 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 - `public ProjectHistoryService(ProjectStore projectStore, ProjectAccessPolicy accessPolicy, ProposalService proposalService, ReviewService reviewService, AuditQueryService auditQueryService, UserService userService)`
 - `public List<TimelineEntry> history(UUID projectId, Actor actor)`
 
-#### `ProjectRepository` [M1 Implemented]
+#### `ProjectListItem`
 
-*interface* `extends JpaRepository<Project, UUID>` · `src/main/java/com/prastav/project/ProjectRepository.java`
+*record* · `src/main/java/com/prastav/project/ProjectListItem.java`
 
-**Responsibility.** Repository pattern: persistence for Project. Role-scoped list queries live here.
+**Responsibility.** One row of the project list: the project plus when its proposal was first submitted (null while never submitted).
+
+**Components:** `Project project, Instant submittedAt`
+
+#### `ProjectListQuery`
+
+*record* · `src/main/java/com/prastav/project/ProjectListQuery.java`
+
+**Responsibility.** Filters, ordering and paging for the role-scoped project list. Every field is optional. Without page the whole filtered list is returned; a page size is clamped to 1..100 (default 10).
+
+**Components:** `Set<ProjectStatus> statuses, String q, UUID reviewerId, ProjectSort sort, Integer page, Integer size`
 
 **Methods:**
 
-- `List<Project> findByOwner_IdOrderByUpdatedAtDesc(UUID ownerId)`
-- `List<Project> findByReviewer_IdOrderByUpdatedAtDesc(UUID reviewerId)`
-- `List<Project> findAllByOrderByUpdatedAtDesc()`
+- `public static ProjectListQuery all()`
+- `public Pageable pageable()`
+
+#### `ProjectRepository` [M1 Implemented]
+
+*interface* `extends JpaRepository<Project, UUID>, JpaSpecificationExecutor<Project>` · `src/main/java/com/prastav/project/ProjectRepository.java`
+
+**Responsibility.** Repository pattern: persistence for Project. The list is queried through ProjectSpecifications (`JpaSpecificationExecutor<Project>`); the grouped counts feed the dashboard summary.
+
+**Methods:**
+
+- `List<ProjectStatusCount> countByStatusForOwner(UUID ownerId)`
+- `List<ProjectStatusCount> countByStatusForReviewer(UUID reviewerId)`
+- `List<ProjectStatusCount> countByStatus()`
+- inherited `Page<Project> findAll(Specification<Project> spec, Pageable pageable)`
+
+#### `ProjectSort`
+
+*enum* · `src/main/java/com/prastav/project/ProjectSort.java`
+
+**Responsibility.** Orderings offered by the project list. Ties are broken by id so pages never overlap.
+
+**Constants:** `LATEST` (updatedAt descending), `OLDEST` (updatedAt ascending), `TITLE` (title, case-insensitive)
+
+**Methods:**
+
+- `public Sort toSort()`
 
 #### `ProjectService` [M1 Implemented]
 
@@ -1044,8 +1086,34 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 - `public ProjectService(ProjectRepository projectRepository, ProjectStore projectStore, ProjectAccessPolicy accessPolicy, ProposalService proposalService, AllowedActionsResolver allowedActionsResolver, UserService userService, ApplicationEventPublisher events)`
 - `public ProjectView createProject(NewProject newProject, ProposalContent proposal, Actor actor)`
-- `public List<Project> listProjects(Actor actor)`
+- `public Page<ProjectListItem> listProjects(Actor actor, ProjectListQuery query)`
+- `public ProjectCounts countProjects(Actor actor)`
 - `public ProjectView getProject(UUID projectId, Actor actor)`
+
+#### `ProjectSpecifications`
+
+*final class* · `src/main/java/com/prastav/project/ProjectSpecifications.java`
+
+**Responsibility.** Specification pattern: the project list is built from small, composable criteria (role scope, status, reviewer, free-text search) instead of one repository method per combination. Search is case-insensitive over title, description, team members, owner name and reviewer name, with LIKE wildcards escaped.
+
+**Methods:**
+
+- `public static Specification<Project> visibleTo(Actor actor)`
+- `public static Specification<Project> statusIn(Set<ProjectStatus> statuses)`
+- `public static Specification<Project> reviewedBy(UUID reviewerId)`
+- `public static Specification<Project> matches(String text)`
+- `public static Specification<Project> forQuery(Actor actor, ProjectListQuery listQuery)`
+
+#### `ProjectStatusCount`
+
+*interface* · `src/main/java/com/prastav/project/ProjectStatusCount.java`
+
+**Responsibility.** Projection for the grouped count queries in ProjectRepository.
+
+**Methods:**
+
+- `ProjectStatus getStatus()`
+- `long getCount()`
 
 #### `ProjectStore` [M1 Implemented]
 
@@ -1127,11 +1195,20 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 - `public ProjectController(ProjectService projectService, WorkflowService workflowService, ProjectHistoryService projectHistoryService)`
 - `public ProjectDetailResponse create(CreateProjectRequest request, Actor actor)`
-- `public List<ProjectSummaryResponse> list(Actor actor)`
+- `public ResponseEntity<List<ProjectSummaryResponse>> list(List<ProjectStatus> status, String q, UUID reviewerId, ProjectSort sort, Integer page, Integer size, Actor actor)`: sets the `X-Total-Count` header
+- `public ProjectCountsResponse summary(Actor actor)`
 - `public ProjectDetailResponse get(UUID id, Actor actor)`
 - `public ProjectDetailResponse submit(UUID id, Actor actor)`
 - `public ProjectDetailResponse assign(UUID id, AssignReviewerRequest request, Actor actor)`
 - `public List<TimelineEntry> history(UUID id, Actor actor)`
+
+#### `ProjectCountsResponse`
+
+*record* · `src/main/java/com/prastav/project/web/ProjectCountsResponse.java`
+
+**Responsibility.** Body of GET /api/projects/summary: counts over the caller's role-scoped projects. awaitingAssignment is null unless the caller is the coordinator.
+
+**Components:** `long total, Map<ProjectStatus, Long> byStatus, Long awaitingAssignment`
 
 #### `ProjectDetailResponse` [M1 Implemented]
 
@@ -1149,16 +1226,17 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 **Methods:**
 
-- `public static ProjectSummaryResponse toSummary(Project project)`
+- `public static ProjectSummaryResponse toSummary(ProjectListItem item)`
+- `public static ProjectCountsResponse toCounts(ProjectCounts counts)`
 - `public static ProjectDetailResponse toDetail(ProjectView view)`
 
 #### `ProjectSummaryResponse` [M1 Implemented]
 
 *record* · `src/main/java/com/prastav/project/web/ProjectSummaryResponse.java`
 
-**Responsibility.** One row of a project list.
+**Responsibility.** One row of a project list. submittedAt is when the proposal was first submitted (null for a project that has never been submitted).
 
-**Components:** `UUID id, String title, ProjectStatus status, UserSummary owner, UserSummary reviewer, Instant updatedAt`
+**Components:** `UUID id, String title, String description, String teamMembers, ProjectStatus status, UserSummary owner, UserSummary reviewer, Instant submittedAt, Instant updatedAt`
 
 
 ### 8.8 Package `com.prastav.proposal`
@@ -1174,6 +1252,17 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 **Methods:**
 
 - `public static ProposalContent empty()`
+
+#### `FirstSubmission`
+
+*interface* · `src/main/java/com/prastav/proposal/FirstSubmission.java`
+
+**Responsibility.** Projection: when a project's proposal was first submitted.
+
+**Methods:**
+
+- `UUID getProjectId()`
+- `Instant getSubmittedAt()`
 
 #### `ProposalDraftUpdatedEvent` [M1 Implemented]
 
@@ -1208,6 +1297,7 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 - `public Optional<ProposalVersion> findOpenDraft(UUID projectId)`
 - `public Optional<ProposalVersion> findLatest(UUID projectId)`
 - `public Optional<ProposalVersion> findLatestSubmitted(UUID projectId)`
+- `public Map<UUID, Instant> firstSubmittedAt(Collection<UUID> projectIds)`
 
 #### `ProposalVersion` [M1 Implemented]
 
@@ -1281,6 +1371,7 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 - `List<ProposalVersion> findByProject_IdOrderByVersionNumberAsc(UUID projectId)`
 - `Optional<ProposalVersion> findFirstByProject_IdOrderByVersionNumberDesc(UUID projectId)`
 - `Optional<ProposalVersion> findFirstByProject_IdAndStateOrderByVersionNumberDesc(UUID projectId, ProposalVersionState state)`
+- `List<FirstSubmission> findFirstSubmissions(Collection<UUID> projectIds)`
 
 #### `ProposalVersionState` [M1 Implemented]
 
@@ -1701,7 +1792,7 @@ Owned by Flyway. M1 ships `V1__init.sql`; Hibernate runs with `ddl-auto: none`. 
 | reviewer_id | UUID | FK users, nullable; index |
 | status | VARCHAR(30) | NOT NULL, CHECK in the six statuses; index |
 | version | BIGINT | NOT NULL DEFAULT 0, optimistic lock |
-| created_at, updated_at | TIMESTAMPTZ | NOT NULL |
+| created_at, updated_at | TIMESTAMPTZ | NOT NULL; `updated_at` indexed (`V2__project_list_indexes.sql`) for the default list order |
 
 ### 9.3 `proposal_versions` [M1 Implemented]
 
@@ -1760,7 +1851,8 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 | GET | /auth/me | any | Current user | 200 `UserResponse` | [M1 Implemented] |
 | GET | /users?role=FACULTY | COORDINATOR | List users (reviewer picker) | 200 `UserResponse[]` | [M1 Implemented] |
 | POST | /projects | STUDENT | Create project + draft v1 | 201 `ProjectDetailResponse` | [M1 Implemented] |
-| GET | /projects | any | Role-scoped list | 200 `ProjectSummaryResponse[]` | [M1 Implemented] |
+| GET | /projects?status=&q=&reviewerId=&sort=&page=&size= | any | Role-scoped list with optional filters, search, sort and paging (section 10.7) | 200 `ProjectSummaryResponse[]`, `X-Total-Count` header | Implemented |
+| GET | /projects/summary | any | Role-scoped counts by status for the dashboards | 200 `ProjectCountsResponse` | Implemented |
 | GET | /projects/{id} | participant | Detail with `allowedActions` | 200 `ProjectDetailResponse` | [M1 Implemented] |
 | PUT | /projects/{id}/proposal | STUDENT owner | Edit open draft | 200 `ProposalVersionResponse` | [M1 Implemented] |
 | POST | /projects/{id}/proposals | STUDENT owner | Create next version (REVISION_REQUESTED only) | 201 `ProposalVersionResponse` | [M1 Implemented] |
@@ -1770,10 +1862,8 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 | POST | /projects/{id}/reviews | FACULTY assigned | Record decision | 201 `ReviewResponse` | [M1 Implemented] |
 | GET | /projects/{id}/reviews | participant | Review history | 200 `ReviewResponse[]` | [M1 Implemented] |
 | GET | /projects/{id}/history | participant | Merged timeline | 200 `TimelineEntry[]` | [M1 Implemented] |
-| GET | /projects?status=&q=&page=&size= | any | Filter, search, paginate | 200 `Page<ProjectSummaryResponse>` | [M2 Planned] |
 | GET | /projects/{id}/proposals/compare?from=1&to=2 | participant | Field diff | 200 `VersionComparison` | [M2 Planned] |
 | PUT | /projects/{id}/assign | COORDINATOR | Reassign reviewer | 200 `ProjectDetailResponse` | [M2 Planned] |
-| GET | /dashboard/summary | COORDINATOR | Counts, pending, workload | 200 `DashboardSummary` | [M2 Planned] |
 | GET | /audit | COORDINATOR | Filtered audit log | 200 `Page<AuditLogResponse>` | [M2 Planned] |
 | GET | /notifications | any | My notifications | 200 `NotificationResponse[]` | [M2 Planned] |
 | PATCH | /notifications/{id}/read | owner of notification | Mark read | 204 | [M2 Planned] |
@@ -1936,7 +2026,36 @@ returns `ProjectDetailResponse` with `"status": "UNDER_REVIEW"` and `"reviewer":
 ]
 ```
 
-### 10.7 [M2 Planned] contracts
+### 10.7 Project list and summary
+
+`GET /api/projects` keeps its original shape (a JSON array) and adds optional query parameters. Without `page` the whole filtered list is returned.
+
+| Parameter | Meaning |
+|---|---|
+| `status` | One or more `ProjectStatus` values, repeated or comma-separated; an unknown value is 400 `VALIDATION_FAILED` |
+| `q` | Case-insensitive text matched against title, description, team members, owner name and reviewer name |
+| `reviewerId` | Only projects assigned to this faculty member |
+| `sort` | `LATEST` (default, last update first), `OLDEST`, `TITLE` |
+| `page`, `size` | Zero-based page and page size (1 to 100, default 10) |
+
+The `X-Total-Count` response header always carries the number of matches across all pages. Each row:
+
+```json
+{ "id": "0b8f6c1e-...", "title": "AI Based Crop Monitoring", "description": "Crop health analysis from drone images.",
+  "teamMembers": "Aarav Mehta, Priya Das", "status": "UNDER_REVIEW",
+  "owner": { "id": "7f1c...", "name": "Aarav Mehta" }, "reviewer": { "id": "a1b2...", "name": "Dr. Anita Rao" },
+  "submittedAt": "2026-10-19T09:20:31.004Z", "updatedAt": "2026-10-19T09:41:12.660Z" }
+```
+
+`submittedAt` is the first submission time of the proposal (null for a project never submitted).
+
+`GET /api/projects/summary` counts the caller's role-scoped projects (own for a student, assigned for faculty, all for the coordinator). Every status is present; `awaitingAssignment` (SUBMITTED projects, which have no reviewer yet) is only filled for the coordinator:
+
+```json
+{ "total": 8, "byStatus": { "DRAFT": 1, "SUBMITTED": 2, "UNDER_REVIEW": 2, "REVISION_REQUESTED": 1, "APPROVED": 1, "REJECTED": 1 }, "awaitingAssignment": 2 }
+```
+
+### 10.8 [M2 Planned] contracts
 
 `GET /api/projects/{id}/proposals/compare?from=1&to=2`
 
@@ -1944,14 +2063,6 @@ returns `ProjectDetailResponse` with `"status": "UNDER_REVIEW"` and `"reviewer":
 { "fromVersion": 1, "toVersion": 2, "fields": [
   { "field": "methodology", "fromValue": "Spring Boot API, React UI.", "toValue": "Spring Boot API, React UI; consent forms and 30-day retention.", "changed": true },
   { "field": "timeline", "fromValue": "8 weeks", "toValue": "8 weeks", "changed": false } ] }
-```
-
-`GET /api/dashboard/summary`
-
-```json
-{ "countsByStatus": { "DRAFT": 3, "SUBMITTED": 2, "UNDER_REVIEW": 4, "REVISION_REQUESTED": 1, "APPROVED": 5, "REJECTED": 1 },
-  "pendingAssignment": [ { "id": "...", "title": "Library Seat Finder", "status": "SUBMITTED", "owner": { "id": "...", "name": "Diya Kapoor" }, "reviewer": null, "updatedAt": "..." } ],
-  "workload": [ { "facultyId": "...", "name": "Dr. Anita Rao", "underReview": 3, "decided": 6 } ] }
 ```
 
 `GET /api/notifications`
@@ -2065,9 +2176,10 @@ The project list is not paginated (M2). The timeline is API-only (UI tab is M2).
 | `ReviewServiceTest` | strategy lookup per decision; review stored against latest submitted version; stale version 409 before any transition; failed transition stores nothing; non-participant 403 |
 | `ProposalServiceTest` | sequential numbering and prefill; v1 unchanged after v2 edits; one open draft; no revision while UNDER_REVIEW; no edit when SUBMITTED; owner-only edit |
 | `ProposalVersionTest` | immutability; missing-field detection; factory numbering |
-| `ProjectServiceTest` | create in DRAFT with v1 and event; faculty cannot create; role-scoped lists; stranger 403; latest submitted version in detail |
+| `ProjectServiceTest` | create in DRAFT with v1 and event; faculty cannot create; list paging, sort and first-submission time; counts per role with zero-filled statuses and awaiting-assignment for the coordinator; stranger 403; latest submitted version in detail |
+| `ProjectListQueryTest` | defaults, trimming, page-size clamping, LIKE wildcard escaping |
 | `AuditEventListenerTest` | status change becomes an audit row with before/after and JSON details; action mapping |
-| `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition |
+| `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding and `X-Total-Count`; unknown status 400; summary body |
 
 All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed.
 

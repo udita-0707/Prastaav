@@ -12,9 +12,13 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Proposal versioning use cases: edit the open draft, start a revision, list versions.
@@ -100,6 +104,16 @@ public class ProposalService {
     public Optional<ProposalVersion> findLatestSubmitted(UUID projectId) {
         return versionRepository.findFirstByProject_IdAndStateOrderByVersionNumberDesc(
                 projectId, ProposalVersionState.SUBMITTED);
+    }
+
+    /** First submission time per project, for list rows; projects never submitted are absent from the map. */
+    @Transactional(readOnly = true)
+    public Map<UUID, Instant> firstSubmittedAt(Collection<UUID> projectIds) {
+        if (projectIds.isEmpty()) {
+            return Map.of();
+        }
+        return versionRepository.findFirstSubmissions(projectIds).stream()
+                .collect(Collectors.toMap(FirstSubmission::getProjectId, FirstSubmission::getSubmittedAt));
     }
 
     private void requireStateAllows(Project project, Action action) {

@@ -2,6 +2,8 @@ package com.prastav.project.web;
 
 import com.prastav.auth.web.UserMapper;
 import com.prastav.project.Project;
+import com.prastav.project.ProjectCounts;
+import com.prastav.project.ProjectListItem;
 import com.prastav.project.ProjectView;
 import com.prastav.proposal.web.ProposalMapper;
 
@@ -13,10 +15,15 @@ public final class ProjectMapper {
     private ProjectMapper() {
     }
 
-    public static ProjectSummaryResponse toSummary(Project project) {
-        return new ProjectSummaryResponse(project.getId(), project.getTitle(), project.getStatus(),
-                UserMapper.toSummary(project.getOwner()), UserMapper.toSummary(project.getReviewer()),
-                project.getUpdatedAt());
+    public static ProjectSummaryResponse toSummary(ProjectListItem item) {
+        Project project = item.project();
+        return new ProjectSummaryResponse(project.getId(), project.getTitle(), project.getDescription(),
+                project.getTeamMembers(), project.getStatus(), UserMapper.toSummary(project.getOwner()),
+                UserMapper.toSummary(project.getReviewer()), item.submittedAt(), project.getUpdatedAt());
+    }
+
+    public static ProjectCountsResponse toCounts(ProjectCounts counts) {
+        return new ProjectCountsResponse(counts.total(), counts.byStatus(), counts.awaitingAssignment());
     }
 
     public static ProjectDetailResponse toDetail(ProjectView view) {

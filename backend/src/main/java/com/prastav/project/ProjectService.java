@@ -8,11 +8,16 @@ import com.prastav.proposal.ProposalContent;
 import com.prastav.proposal.ProposalService;
 import com.prastav.proposal.ProposalVersion;
 import com.prastav.workflow.AllowedActionsResolver;
+import com.prastav.workflow.ProjectStatus;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -54,14 +59,34 @@ public class ProjectService {
         return buildView(project, actor);
     }
 
-    /** Business rule 1: students see their own, faculty their assigned, the coordinator all projects. */
+    /**
+     * Business rule 1 (students see their own, faculty their assigned, the coordinator all projects),
+     * narrowed by the optional filters in {@code query}.
+     */
     @Transactional(readOnly = true)
-    public List<Project> listProjects(Actor actor) {
-        return switch (actor.role()) {
-            case STUDENT -> projectRepository.findByOwner_IdOrderByUpdatedAtDesc(actor.userId());
-            case FACULTY -> projectRepository.findByReviewer_IdOrderByUpdatedAtDesc(actor.userId());
-            case COORDINATOR -> projectRepository.findAllByOrderByUpdatedAtDesc();
+    public Page<ProjectListItem> listProjects(Actor actor, ProjectListQuery query) {
+        Page<Project> page = projectRepository.findAll(ProjectSpecifications.forQuery(actor, query), query.pageable());
+        Map<UUID, Instant> submittedAt = proposalService.firstSubmittedAt(page.map(Project::getId).getContent());
+        return page.map(project -> new ProjectListItem(project, submittedAt.get(project.getId())));
+    }
+
+    /** Dashboard counts over the same role scope as the list. */
+    @Transactional(readOnly = true)
+    public ProjectCounts countProjects(Actor actor) {
+        List<ProjectStatusCount> rows = switch (actor.role()) {
+            case STUDENT -> projectRepository.countByStatusForOwner(actor.userId());
+            case FACULTY -> projectRepository.countByStatusForReviewer(actor.userId());
+            case COORDINATOR -> projectRepository.countByStatus();
         };
+        Map<ProjectStatus, Long> byStatus = new EnumMap<>(ProjectStatus.class);
+        for (ProjectStatus status : ProjectStatus.values()) {
+            byStatus.put(status, 0L);
+        }
+        rows.forEach(row -> byStatus.put(row.getStatus(), row.getCount()));
+        long total = byStatus.values().stream().mapToLong(Long::longValue).sum();
+        // A SUBMITTED project has no reviewer yet: assigning one moves it to UNDER_REVIEW.
+        Long awaitingAssignment = actor.hasRole(Role.COORDINATOR) ? byStatus.get(ProjectStatus.SUBMITTED) : null;
+        return new ProjectCounts(total, byStatus, awaitingAssignment);
     }
 
     @Transactional(readOnly = true)

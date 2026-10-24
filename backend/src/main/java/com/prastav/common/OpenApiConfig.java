@@ -10,7 +10,7 @@ import org.springframework.context.annotation.Configuration;
 /** Swagger UI metadata and the "Authorize" button for Bearer JWTs. */
 @Configuration
 @OpenAPIDefinition(
-        info = @Info(title = "Prastav API", version = "M1",
+        info = @Info(title = "Prastaav API", version = "1.0",
                 description = "Academic project proposal workflow and approval"),
         security = @SecurityRequirement(name = "bearerAuth"))
 @SecurityScheme(name = "bearerAuth", type = SecuritySchemeType.HTTP, scheme = "bearer", bearerFormat = "JWT")
