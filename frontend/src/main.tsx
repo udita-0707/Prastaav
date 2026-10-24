@@ -7,7 +7,6 @@ import { AuthProvider } from './auth/AuthContext';
 import { ToastProvider } from './components/ui';
 import './index.css';
 import { router } from './router';
-import './styles.css';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
 

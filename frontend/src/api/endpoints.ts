@@ -12,6 +12,7 @@ import type {
   ReviewRequest,
   ReviewResponse,
   Role,
+  TimelineEntry,
   UserResponse,
 } from './types';
 
@@ -57,3 +58,6 @@ export const recordReview = (projectId: string, body: ReviewRequest) =>
 
 export const listReviews = (projectId: string) =>
   api.get<ReviewResponse[]>(`/projects/${projectId}/reviews`).then((r) => r.data);
+
+export const getHistory = (projectId: string) =>
+  api.get<TimelineEntry[]>(`/projects/${projectId}/history`).then((r) => r.data);

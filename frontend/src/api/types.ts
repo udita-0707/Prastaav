@@ -141,3 +141,14 @@ export interface ApiError {
   path: string;
   fieldErrors: { field: string; message: string }[];
 }
+
+export type TimelineEntryType = 'VERSION_CREATED' | 'STATUS_CHANGED' | 'REVIEW';
+
+export interface TimelineEntry {
+  at: string;
+  type: TimelineEntryType;
+  actorId: string;
+  actorName: string | null;
+  summary: string;
+  versionNumber: number | null;
+}
