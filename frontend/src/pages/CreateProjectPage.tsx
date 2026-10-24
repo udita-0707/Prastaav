@@ -18,7 +18,7 @@ export function CreateProjectPage() {
     mutationFn: () => createProject({ title, description, techStack, teamMembers, proposal }),
     onSuccess: (project) => {
       queryClient.invalidateQueries({ queryKey: ['projects'] });
-      navigate(`/projects/${project.id}`);
+      navigate(`/app/projects/${project.id}`);
     },
   });
 

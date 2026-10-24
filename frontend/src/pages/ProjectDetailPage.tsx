@@ -50,7 +50,7 @@ export function ProjectDetailPage() {
     mutationFn: () => createNextVersion(id),
     onSuccess: () => {
       refresh();
-      navigate(`/projects/${id}/edit`);
+      navigate(`/app/projects/${id}/edit`);
     },
   });
 
@@ -91,7 +91,7 @@ export function ProjectDetailPage() {
                   Still needed before you can submit: {current.missingFields.map((f) => FIELD_LABEL[f as keyof typeof FIELD_LABEL] ?? f).join(', ')}.
                 </p>
               )}
-              <Link to={`/projects/${id}/edit`} className="button">
+              <Link to={`/app/projects/${id}/edit`} className="button">
                 Edit draft v{current.versionNumber}
               </Link>
             </div>

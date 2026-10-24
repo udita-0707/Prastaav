@@ -32,7 +32,7 @@ export function ProposalEditorPage() {
     mutationFn: () => updateDraft(id, { ...content, referenceLink: content.referenceLink?.trim() || null }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['project', id] });
-      navigate(`/projects/${id}`);
+      navigate(`/app/projects/${id}`);
     },
   });
 
@@ -43,14 +43,14 @@ export function ProposalEditorPage() {
       <section className="narrow">
         <h1>Nothing to edit</h1>
         <p>This project has no open draft. Submitted versions cannot be changed.</p>
-        <Link to={`/projects/${id}`}>Back to the project</Link>
+        <Link to={`/app/projects/${id}`}>Back to the project</Link>
       </section>
     );
   }
 
   return (
     <section className="narrow">
-      <Link to={`/projects/${id}`} className="muted">
+      <Link to={`/app/projects/${id}`} className="muted">
         {project.data.title}
       </Link>
       <h1>Edit draft, version {draft.versionNumber}</h1>
@@ -66,7 +66,7 @@ export function ProposalEditorPage() {
           <button className="primary" disabled={mutation.isPending}>
             Save draft
           </button>
-          <Link to={`/projects/${id}`} className="button">
+          <Link to={`/app/projects/${id}`} className="button">
             Cancel
           </Link>
         </div>

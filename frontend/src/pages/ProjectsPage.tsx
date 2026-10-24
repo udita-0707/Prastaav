@@ -30,7 +30,7 @@ export function ProjectsPage() {
       <div className="page-head">
         <h1>{HEADING[user.role]}</h1>
         {user.role === 'STUDENT' && (
-          <Link to="/projects/new" className="button primary">
+          <Link to="/app/projects/new" className="button primary">
             New project
           </Link>
         )}
@@ -54,7 +54,7 @@ export function ProjectsPage() {
               {projects.data.map((p) => (
                 <tr key={p.id}>
                   <td>
-                    <Link to={`/projects/${p.id}`}>{p.title}</Link>
+                    <Link to={`/app/projects/${p.id}`}>{p.title}</Link>
                   </td>
                   <td>
                     <StatusBadge status={p.status} />
