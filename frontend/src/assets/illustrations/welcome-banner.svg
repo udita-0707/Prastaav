@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="180" viewBox="0 0 360 180" fill="none">
+  <defs>
+    <linearGradient id="wb-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EFF6FF"/><stop offset="1" stop-color="#EAF7F5"/></linearGradient>
+  </defs>
+  <path d="M40 150c40-70 90-110 140-110s110 40 150 110Z" fill="url(#wb-sky)"/>
+  <path d="M80 150l60-74 36 40 34-50 70 84Z" fill="#BFDBFE"/>
+  <path d="M150 150l40-46 26 26 24-30 50 50Z" fill="#93C5FD"/>
+  <path d="M96 150c-8-34 10-56 32-52-8 18-8 36-2 52Z" fill="#6FCBBF"/>
+  <rect x="160" y="128" width="96" height="12" rx="3" fill="#2563EB"/>
+  <rect x="166" y="116" width="84" height="12" rx="3" fill="#0F9D8F"/>
+  <rect x="156" y="140" width="104" height="12" rx="3" fill="#1E3A8A"/>
+  <path d="M210 92l26-12 26 12-26 12Z" fill="#0B1F4D"/>
+  <path d="M222 98v10c9 6 19 6 28 0V98" stroke="#0B1F4D" stroke-width="3"/>
+  <path d="M262 92v14" stroke="#FBBF24" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M300 60h44" stroke="#CBD5E1" stroke-width="2" stroke-linecap="round"/>
+  <path d="M290 74h36" stroke="#E2E8F0" stroke-width="2" stroke-linecap="round"/>
+</svg>

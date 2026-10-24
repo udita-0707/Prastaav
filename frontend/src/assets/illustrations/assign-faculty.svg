@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="280" height="160" viewBox="0 0 280 160" fill="none">
+  <ellipse cx="140" cy="146" rx="120" ry="10" fill="#DCEFF5"/>
+  <path d="M28 150c-8-36 14-62 38-56-8 20-10 40-2 58Z" fill="#6FCBBF"/>
+  <path d="M252 150c8-32-12-56-34-52 8 20 8 36 2 54Z" fill="#93C5FD"/>
+  <g stroke="#94A3B8" stroke-width="2" stroke-dasharray="4 5">
+    <path d="M140 80 76 40"/><path d="M140 80 204 40"/><path d="M140 80v52"/>
+  </g>
+  <rect x="104" y="56" width="72" height="48" rx="12" fill="#FFFFFF" stroke="#E2E8F0" stroke-width="2"/>
+  <rect x="116" y="68" width="30" height="5" rx="2.5" fill="#0F9D8F"/><rect x="116" y="79" width="48" height="5" rx="2.5" fill="#E2E8F0"/><rect x="116" y="89" width="36" height="5" rx="2.5" fill="#E2E8F0"/>
+  <g>
+    <rect x="56" y="20" width="40" height="40" rx="10" fill="#EAF7F5" stroke="#6FCBBF" stroke-width="2"/>
+    <circle cx="76" cy="35" r="6" fill="#0F9D8F"/><path d="M66 52c2-6 6-9 10-9s8 3 10 9" fill="#0F9D8F"/>
+  </g>
+  <g>
+    <rect x="184" y="20" width="40" height="40" rx="10" fill="#EFF4FF" stroke="#93C5FD" stroke-width="2"/>
+    <circle cx="204" cy="35" r="6" fill="#2563EB"/><path d="M194 52c2-6 6-9 10-9s8 3 10 9" fill="#2563EB"/>
+  </g>
+  <g>
+    <rect x="120" y="112" width="40" height="34" rx="10" fill="#F5F3FF" stroke="#C4B5FD" stroke-width="2"/>
+    <circle cx="140" cy="124" r="5" fill="#7C3AED"/><path d="M131 139c2-5 5-7 9-7s7 2 9 7" fill="#7C3AED"/>
+  </g>
+</svg>
