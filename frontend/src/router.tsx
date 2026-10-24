@@ -1,22 +1,17 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { RequireAuth } from './auth/RequireAuth';
-import { useAuth } from './auth/AuthContext';
 import { AppShell } from './layouts/AppShell';
 import { AssignPage } from './pages/AssignPage';
 import { HomePage } from './pages/HomePage';
+import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { ProjectWizardPage } from './pages/ProjectWizardPage';
 import { RegisterPage } from './pages/RegisterPage';
 
-function RootRedirect() {
-  const { user } = useAuth();
-  return <Navigate to={user ? '/app' : '/login'} replace />;
-}
-
 export const router = createBrowserRouter([
-  { path: '/', element: <RootRedirect /> },
+  { path: '/', element: <LandingPage /> },
   { path: '/login', element: <LoginPage /> },
   { path: '/register', element: <RegisterPage /> },
   {

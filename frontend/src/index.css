@@ -4,7 +4,7 @@
 
 @layer base {
   html {
-    @apply bg-canvas text-ink antialiased;
+    @apply scroll-smooth bg-canvas text-ink antialiased;
     font-family: theme('fontFamily.sans');
   }
 
