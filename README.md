@@ -23,7 +23,7 @@
 - Follow every review in progress from the "Reviews" list.
 - Create faculty and coordinator accounts on the institutional domain through `POST /api/users`.
 
-## Screens
+### Screens
 
 | Screen | Route | Who |
 | --- | --- | --- |
@@ -56,45 +56,7 @@ The web app is a React single-page app. Pages are composed from a small design s
 | UI | Tailwind CSS 3, lucide-react icons, Plus Jakarta Sans (self-hosted through Fontsource) |
 | Tests | JUnit 5, Mockito, MockMvc |
 
-## Run it
-
-Prerequisites: JDK 17 or newer, Maven 3.9+, Node.js 20+ and Docker (or a local PostgreSQL 16 with database, user and password `prastav`).
-
-```bash
-docker compose up -d                              # PostgreSQL on localhost:5432
-cd backend && mvn spring-boot:run                 # API on http://localhost:8080 (Flyway migrates, demo users are seeded)
-cd frontend && npm install && npm run dev         # web app on http://localhost:5173 (second terminal)
-```
-
-Open http://localhost:5173. Swagger UI is at http://localhost:8080/swagger-ui.html: sign in with `POST /api/auth/login`, click **Authorize** and paste the token.
-
-### Demo accounts
-
-All seeded accounts are fictional people and share one password, `prastav.seed.demo-password` (default **Password@123**). The sign-in page has "Try demo accounts" buttons that fill these in.
-
-| Role | Name | Email | Admission year, branch |
-| --- | --- | --- | --- |
-| Coordinator | Meera Nair | coordinator@nst.rishihood.edu.in | |
-| Faculty | Dr. Anita Rao | anita.rao@nst.rishihood.edu.in | |
-| Faculty | Dr. Vikram Shah | vikram.shah@nst.rishihood.edu.in | |
-| Student | Aarav Mehta | aarav.23csai@nst.rishihood.edu.in | 2023, CSAI |
-| Student | Diya Kapoor | diya.23csai@nst.rishihood.edu.in | 2023, CSAI |
-| Student | Rohan Iyer | rohan.24csai@nst.rishihood.edu.in | 2024, CSAI |
-
-## Configuration
-
-### Backend
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `DB_URL` | `jdbc:postgresql://localhost:5432/prastav` | JDBC URL |
-| `DB_USER` / `DB_PASSWORD` | `prastav` / `prastav` | database credentials |
-| `JWT_SECRET` | development-only value | HS256 key, at least 32 bytes; set your own outside a demo |
-| `CORS_ORIGIN` | `http://localhost:5173` | allowed browser origin |
-| `SEED_DEMO_DATA` | `true` | create the demo users on an empty database |
-| `DEMO_PASSWORD` | `Password@123` | shared password of every demo account |
-
-### Institution
+## Institution configuration
 
 The institution profile lives under `prastav.institution` in `backend/src/main/resources/application.yml` and is bound to `InstitutionProperties`. `PatternEmailPolicy` applies it to every new account.
 
@@ -107,6 +69,20 @@ The institution profile lives under `prastav.institution` in `backend/src/main/r
 Rules:
 - `POST /api/auth/register` creates **students only**. The email must be on the institutional domain and match the student pattern, e.g. `aarav.23csai@nst.rishihood.edu.in` is admission year 2023, branch CSAI. Emails are matched case-insensitively and stored in lower case. Any other email, or a request for another role, is rejected with `400 VALIDATION_FAILED`.
 - Faculty and coordinator accounts are created by the coordinator through `POST /api/users` (domain check only) or by the seed.
+
+## Other configuration
+
+### Backend
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DB_PORT` | `5432` | host port of the Docker Compose database |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/prastav` | JDBC URL |
+| `DB_USER` / `DB_PASSWORD` | `prastav` / `prastav` | database credentials |
+| `JWT_SECRET` | development-only value | HS256 key, at least 32 bytes; set your own outside a demo |
+| `CORS_ORIGIN` | `http://localhost:5173` | allowed browser origin |
+| `SEED_DEMO_DATA` | `true` | create the demo users on an empty database |
+| `DEMO_PASSWORD` | `Password@123` | shared password of every demo account |
 
 ### Frontend
 
@@ -121,7 +97,52 @@ Copy `frontend/.env.example` to `frontend/.env` to change these.
 
 The product name and tagline are defined once in `frontend/src/config/brand.ts`, and every image is referenced from `frontend/src/assets/index.ts`, so the logo and illustrations can be replaced without code changes (see [`docs/design/ASSETS.md`](docs/design/ASSETS.md)).
 
+## Demo accounts
+
+All seeded accounts are fictional people and share one password, `prastav.seed.demo-password` (default **Password@123**). The sign-in page has "Try demo accounts" buttons that fill these in.
+
+| Role | Name | Email | Admission year, branch |
+| --- | --- | --- | --- |
+| Coordinator | Meera Nair | coordinator@nst.rishihood.edu.in | |
+| Faculty | Dr. Anita Rao | anita.rao@nst.rishihood.edu.in | |
+| Faculty | Dr. Vikram Shah | vikram.shah@nst.rishihood.edu.in | |
+| Student | Aarav Mehta | aarav.23csai@nst.rishihood.edu.in | 2023, CSAI |
+| Student | Diya Kapoor | diya.23csai@nst.rishihood.edu.in | 2023, CSAI |
+| Student | Rohan Iyer | rohan.24csai@nst.rishihood.edu.in | 2024, CSAI |
+
+### Five-minute demo
+
+1. Sign in as **aarav.23csai@nst.rishihood.edu.in**, create a project in the wizard, fill every step, then **Submit proposal**.
+2. Sign in as **coordinator@nst.rishihood.edu.in**, open **Assign Faculty**, choose **Dr. Anita Rao** for the project.
+3. Sign in as **anita.rao@nst.rishihood.edu.in**, open the project from **Awaiting your review**, choose **Request changes**, write a comment and **Record decision**.
+4. As the student: read the feedback, **Start version 2**, edit it with the feedback panel open, then **Resubmit v2**. The Versions tab shows v1 unchanged.
+5. As the faculty member: **Approve**.
+6. In Swagger: `GET /api/projects/{id}/history` shows every step; `POST /api/projects/{id}/reviews` with `{"decision":"APPROVE"}` on a project that is only SUBMITTED returns **409 ILLEGAL_TRANSITION**.
+
+## Run it
+
+Prerequisites: JDK 17 or newer, Maven 3.9+, Node.js 20+ and Docker. Run each command from the repository root, the second and third in their own terminals:
+
+```bash
+docker compose up -d                                              # PostgreSQL 16 on localhost:5432
+mvn -f backend/pom.xml spring-boot:run                            # API on http://localhost:8080; Flyway migrates and the demo users are seeded
+npm --prefix frontend install && npm --prefix frontend run dev    # web app on http://localhost:5173
+```
+
+Open http://localhost:5173 and sign in with a demo account. If port 5432 is taken by a local PostgreSQL, start the database with `DB_PORT=5433 docker compose up -d` and the backend with `DB_URL=jdbc:postgresql://localhost:5433/prastav mvn -f backend/pom.xml spring-boot:run`.
+
+### Troubleshooting
+
+- **Backend fails at startup with a connection error**: PostgreSQL is not running; check `docker compose ps`.
+- **Port 5432 already in use**: stop the local PostgreSQL, or set `DB_PORT` and `DB_URL` as shown above.
+- **"Flyway validate failed" after editing a migration**: never edit an applied migration; add a new `V<n>__...sql`, or for a throwaway demo database run `docker compose down -v`.
+- **The web app says the server is not reachable**: the backend is not on port 8080; Vite proxies `/api` there.
+- **Demo sign-in fails with "Invalid email or password"**: the seed only runs on an empty database, so a database that already had other users has no demo accounts; for a throwaway demo database run `docker compose down -v` and start the backend again.
+- **Signed out after an hour**: the JWT expired; sign in again.
+
 ## API
+
+Swagger UI is at http://localhost:8080/swagger-ui.html (OpenAPI JSON at `/v3/api-docs`): sign in with `POST /api/auth/login`, click **Authorize** and paste the token.
 
 Base path `/api`; every endpoint except register, login and Swagger needs `Authorization: Bearer <jwt>`. Errors share one body: `{ timestamp, status, code, message, path, fieldErrors[] }`. The full contracts are in `docs/LLD.md` section 10.
 
@@ -203,21 +224,3 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 | Repository | Spring Data repositories per module |
 | Builder | `AuditLog.Builder` |
 | DTO and mapper | `*Request` / `*Response` records with `*Mapper` classes |
-
-## Five-minute demo
-
-1. Sign in as **aarav.23csai@nst.rishihood.edu.in**, create a project in the wizard, fill every step, then **Submit proposal**.
-2. Sign in as **coordinator@nst.rishihood.edu.in**, open **Assign Faculty**, choose **Dr. Anita Rao** for the project.
-3. Sign in as **anita.rao@nst.rishihood.edu.in**, open the project from **Awaiting your review**, choose **Request changes**, write a comment and **Record decision**.
-4. As the student: read the feedback, **Start version 2**, edit it with the feedback panel open, then **Resubmit v2**. The Versions tab shows v1 unchanged.
-5. As the faculty member: **Approve**.
-6. In Swagger: `GET /api/projects/{id}/history` shows every step; `POST /api/projects/{id}/reviews` with `{"decision":"APPROVE"}` on a project that is only SUBMITTED returns **409 ILLEGAL_TRANSITION**.
-
-## Troubleshooting
-
-- **Backend fails at startup with a connection error**: PostgreSQL is not running; check `docker compose ps`.
-- **Port 5432 already in use**: stop the local PostgreSQL or change the left side of the port mapping and `DB_URL`.
-- **"Flyway validate failed" after editing a migration**: never edit an applied migration; add a new `V<n>__...sql`, or for a throwaway demo database run `docker compose down -v`.
-- **The web app says the server is not reachable**: the backend is not on port 8080; Vite proxies `/api` there.
-- **Demo sign-in fails with "Invalid email or password"**: the seed only runs on an empty database, so a database that already had other users has no demo accounts; for a throwaway demo database run `docker compose down -v` and start the backend again.
-- **Signed out after an hour**: the JWT expired; sign in again.
