@@ -8,30 +8,38 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Locale;
 
-/** Registration and login. Passwords are hashed with BCrypt; a successful call returns a JWT. */
+/**
+ * Registration and login. Passwords are hashed with BCrypt; a successful call returns a JWT.
+ * Self-registration is for students only, with an email accepted by the {@link EmailPolicy}.
+ */
 @Service
 public class AuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final EmailPolicy emailPolicy;
 
-    public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
+    public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService,
+                       EmailPolicy emailPolicy) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.emailPolicy = emailPolicy;
     }
 
+    /** Registers a STUDENT. {@code role} may be omitted; any role other than STUDENT is rejected. */
     @Transactional
     public AuthResult register(String name, String email, String password, Role role) {
-        if (role == Role.COORDINATOR) {
-            throw new ValidationException("Coordinator accounts cannot self-register; they are created by seed data");
+        if (role != null && role != Role.STUDENT) {
+            throw new ValidationException(
+                    "Only students can register; faculty and coordinator accounts are created by the coordinator");
         }
-        String normalizedEmail = normalize(email);
-        if (userRepository.existsByEmail(normalizedEmail)) {
+        StudentEmail studentEmail = emailPolicy.requireStudent(email);
+        if (userRepository.existsByEmail(studentEmail.email())) {
             throw new ValidationException("Email is already registered");
         }
-        User user = userRepository.save(new User(name.trim(), normalizedEmail, passwordEncoder.encode(password), role));
+        User user = userRepository.save(User.student(name.trim(), studentEmail, passwordEncoder.encode(password)));
         return new AuthResult(jwtService.generateToken(user), user);
     }
 
