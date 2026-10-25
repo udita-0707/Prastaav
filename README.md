@@ -31,7 +31,7 @@
 | Sign in, with demo-account buttons | `/login` | everyone |
 | Create an account | `/register` | students |
 | Home dashboard | `/app` | each role has its own |
-| Project list (My / Assigned / All Projects) | `/app/projects` | all roles, scoped by role |
+| Project list (My / Assigned / All Projects): title search, status filter, sort, pager with "Showing x–y of n"; the coordinator also filters by faculty, batch year and branch; loading, empty and error states | `/app/projects` | all roles, scoped by role |
 | Create project wizard | `/app/projects/new` | student |
 | Project page: overview, versions, reviews, timeline, next step | `/app/projects/:id` | participants |
 | Edit draft or revision | `/app/projects/:id/edit` | student owner |
