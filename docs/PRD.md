@@ -49,7 +49,7 @@ Product decisions: one assigned faculty reviewer per project; a REJECTED project
 | FR-10 | Every state change, assignment, submission and review recorded in audit log (who, what, when, before/after) |
 | FR-11 | Project timeline view (all versions, reviews, status changes in order) |
 | FR-12 | Role-scoped project lists with status filter, case-insensitive search and pagination (page from 0, size 1 to 50, default 10); filtering and paging run in the database; invalid parameters are rejected with `VALIDATION_FAILED` |
-| FR-13 | In-app notifications on assignment, review decision, resubmission |
+| FR-13 | In-app notifications on assignment, review decision, resubmission, delivered through the configured channels (in-app inbox; email written to the log) |
 | FR-14 | Compare two proposal versions (field-level diff) |
 | FR-15 | Coordinator dashboard: counts by status, pending-assignment list, reviewer workload |
 | FR-16 | Coordinator audit-log viewer with filters |
@@ -135,7 +135,7 @@ com.prastav
  ├─ review      (Review, ReviewDecision, ReviewService, ReviewController)
  ├─ workflow    (ProjectStatus, ProjectState + 6 state classes, ProjectStateFactory, WorkflowService)
  ├─ audit       (AuditLog, AuditEventListener, AuditQueryService)
- ├─ notification (Notification, NotificationType, NotificationRepository, NotificationService; web: NotificationResponse, NotificationMapper)
+ ├─ notification (Notification, NotificationType, NotificationRepository, NotificationService, NotificationChannel, InAppNotificationChannel, EmailNotificationChannel, NotificationDispatcher, NotificationProperties; web: NotificationResponse, NotificationMapper)
  └─ common      (ApiError, GlobalExceptionHandler, exceptions, base entity)
 ```
 
@@ -191,7 +191,7 @@ public class DraftState implements ProjectState {
 | State | `workflow` module | Replaces status if/else chains; legal transitions per state |
 | Observer (Spring events) | `ProjectStatusChangedEvent`, `ReviewRecordedEvent` → `AuditEventListener` | Audit decoupled from workflow |
 | Factory | `ProjectStateFactory`, `ProposalVersionFactory` (new version from previous) | Centralized object creation |
-| Strategy | `ReviewDecisionHandler` per decision (Approve/Revise/Reject); `EmailPolicy` / `PatternEmailPolicy` for account emails | Add behaviour without modifying services |
+| Strategy | `ReviewDecisionHandler` per decision (Approve/Revise/Reject); `EmailPolicy` / `PatternEmailPolicy` for account emails; `NotificationChannel` (in-app, email log) run by `NotificationDispatcher` | Add behaviour without modifying services |
 | Specification | `ProjectSpecifications` (role scope, status, reviewer, search) | One composable query for every list filter |
 | Facade | `WorkflowService` | One simple API over state, repository, events |
 | Repository | Spring Data JPA | Persistence abstraction |

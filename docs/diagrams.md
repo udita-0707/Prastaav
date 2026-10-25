@@ -545,7 +545,7 @@ flowchart TB
   FLY --> DB
 ```
 
-## 11. Observer and Strategy
+## 11. Observer and Strategy (events, review decisions, email policy, notification channels)
 
 ```mermaid
 classDiagram
@@ -600,4 +600,29 @@ classDiagram
   }
   AuthService --> EmailPolicy : requireStudent()
   UserService --> EmailPolicy : requireInstitutional()
+  class NotificationChannel {
+    <<interface>>
+    +name() String
+    +deliver(Notification notification)
+  }
+  class InAppNotificationChannel {
+    -NotificationService notificationService
+  }
+  class EmailNotificationChannel
+  NotificationChannel <|.. InAppNotificationChannel
+  NotificationChannel <|.. EmailNotificationChannel
+  class NotificationDispatcher {
+    -List~NotificationChannel~ enabledChannels
+    +dispatch(Notification notification)
+  }
+  class NotificationProperties {
+    <<record>>
+    +enabledChannels() List~String~
+  }
+  NotificationDispatcher o--> NotificationChannel
+  NotificationDispatcher ..> NotificationProperties : enabled-channels
+  class NotificationService {
+    +create(recipient, project, type, message) Notification
+  }
+  InAppNotificationChannel --> NotificationService : create()
 ```

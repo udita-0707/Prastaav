@@ -54,7 +54,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-10 | Audit log for every state change, assignment, submission, review | `AuditEventListener`, `AuditLog`, append-only trigger |
 | FR-11 | Project timeline | `ProjectHistoryService`, `GET /api/projects/{id}/history`, Timeline tab of the project page |
 | FR-12 | Role-scoped lists with status filter, search, pagination | `ProjectService.listProjects`, `ProjectListQuery`, `ProjectSpecifications`, `GET /api/projects?status=&q=&reviewerId=&sort=&page=&size=` |
-| FR-13 | In-app notifications stored per recipient with a read flag; inbox, unread count and mark-read scoped to the recipient | `Notification`, `NotificationRepository`, `NotificationService`, `NotificationMapper`, `V4__notifications.sql` |
+| FR-13 | In-app notifications stored per recipient with a read flag; inbox, unread count and mark-read scoped to the recipient; delivery through the configured channels (in-app, email log) | `Notification`, `NotificationRepository`, `NotificationService`, `NotificationMapper`, `NotificationDispatcher`, `NotificationChannel`, `V4__notifications.sql` |
 | FR-15 | Role dashboards: counts per status and projects awaiting assignment | `ProjectService.countProjects`, `GET /api/projects/summary`, web app home pages |
 | FR-18 | Institution profile and email policy: institutional domain for every account; student-only registration with `<firstname>.<YY><branch>@domain`, storing admission year and branch; staff accounts created by the coordinator | `InstitutionProperties`, `EmailPolicy`, `PatternEmailPolicy`, `AuthService.register`, `UserService.createAccount`, `POST /api/users`, `V3__user_institution_profile.sql` |
 
@@ -67,7 +67,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service | 128 tests in `backend/src/test/java` (see section 16) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service and channels | 135 tests in `backend/src/test/java` (see section 16) |
 | MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | `ProjectControllerWebTest` (13 tests), `UserControllerWebTest` (4 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
@@ -144,7 +144,9 @@ com.prastav
 │  └─ web      ReviewController, ReviewRequest, ReviewResponse, ReviewMapper
 ├─ audit       AuditLog, AuditAction, AuditLogRepository, AuditRecorder, JpaAuditRecorder,
 │              AuditEventListener, AuditQueryService
-└─ notification Notification, NotificationType, NotificationRepository, NotificationService
+└─ notification Notification, NotificationType, NotificationRepository, NotificationService,
+               NotificationChannel, InAppNotificationChannel, EmailNotificationChannel,
+               NotificationDispatcher, NotificationProperties
    └─ web      NotificationResponse, NotificationMapper
 ```
 
@@ -251,7 +253,7 @@ Because step 4 runs before step 5 inside one transaction, a failed transition ne
 
 ## 8. Class catalogue
 
-Generated from `backend/src/main/java` (116 classes). Private helper methods are omitted; private fields are listed.
+Generated from `backend/src/main/java` (121 classes). Private helper methods are omitted; private fields are listed.
 
 ### 8.1 Package `com.prastav`
 
@@ -1769,6 +1771,37 @@ Generated from `backend/src/main/java` (116 classes). Private helper methods are
 
 ### 8.13 Package `com.prastav.notification`
 
+**Delivery (Strategy).** A notification is delivered through `NotificationDispatcher.dispatch(Notification)`. Each delivery route is a `NotificationChannel` strategy: `InAppNotificationChannel` stores it through `NotificationService.create`, and `EmailNotificationChannel` writes the email to the log without sending anything. `prastav.notification.enabled-channels` (`NOTIFICATION_CHANNELS`, default `in-app,email`) lists the channels in the order they run. The dispatcher catches and logs a `RuntimeException` from any channel and moves on to the next one, so a failing email route never loses the in-app notification. A name in the list with no matching channel bean stops the application at startup.
+
+![Notification channels](uml/png/12_events_and_strategies.png)
+
+#### `EmailNotificationChannel`
+
+*class* `implements NotificationChannel` · @Component · `src/main/java/com/prastav/notification/EmailNotificationChannel.java`
+
+**Responsibility.** Strategy pattern: the NotificationChannel for email. It writes the message that would be mailed to the application log and sends nothing.
+
+**Methods:**
+
+- `public String name()`: `"email"` (`NAME`)
+- `public void deliver(Notification notification)`: logs recipient email, type and message at INFO
+
+#### `InAppNotificationChannel`
+
+*class* `implements NotificationChannel` · @Component · `src/main/java/com/prastav/notification/InAppNotificationChannel.java`
+
+**Responsibility.** Strategy pattern: the NotificationChannel that stores the notification in the recipient's inbox.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `notificationService` | `NotificationService` | private |
+
+**Methods:**
+
+- `public InAppNotificationChannel(NotificationService notificationService)`
+- `public String name()`: `"in-app"` (`NAME`)
+- `public void deliver(Notification notification)`: `NotificationService.create(recipient, project, type, message)`
+
 #### `Notification`
 
 *class* `extends BaseEntity` · @Entity · `src/main/java/com/prastav/notification/Notification.java`
@@ -1794,6 +1827,40 @@ Generated from `backend/src/main/java` (116 classes). Private helper methods are
 - `public NotificationType getType()`
 - `public String getMessage()`
 - `public boolean isRead()`
+
+#### `NotificationChannel`
+
+*interface* · `src/main/java/com/prastav/notification/NotificationChannel.java`
+
+**Responsibility.** Strategy pattern: one way of delivering a Notification to its recipient. The dispatcher depends only on this interface, so adding a delivery route is a new implementation rather than an edit to the dispatcher. Implementations signal a failed delivery by throwing a runtime exception.
+
+**Methods:**
+
+- `String name()`: the name used in `prastav.notification.enabled-channels`
+- `void deliver(Notification notification)`
+
+#### `NotificationDispatcher`
+
+*class* · @Component · `src/main/java/com/prastav/notification/NotificationDispatcher.java`
+
+**Responsibility.** Sends a notification through every channel named in `prastav.notification.enabled-channels`, in the configured order. A channel that throws is logged and skipped, so one failing channel never stops the others. An unknown channel name fails at startup.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `enabledChannels` | `List<NotificationChannel>` | private |
+
+**Methods:**
+
+- `public NotificationDispatcher(List<NotificationChannel> channels, NotificationProperties properties)`: resolves the configured names to channels; IllegalStateException for an unknown name
+- `public void dispatch(Notification notification)`: calls `deliver` on each enabled channel; a RuntimeException is logged at WARN and the next channel runs
+
+#### `NotificationProperties`
+
+*record* · @ConfigurationProperties(prefix = "prastav.notification") · @Validated · `src/main/java/com/prastav/notification/NotificationProperties.java`
+
+**Responsibility.** Notification delivery settings bound from `prastav.notification` in application.yml: the names of the channels every notification is sent through.
+
+**Components:** `@NotNull List<String> enabledChannels`
 
 #### `NotificationRepository`
 
@@ -2236,7 +2303,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | Factory | `ProjectStateFactory` (status to state), `ProposalVersionFactory` (v1 and vN+1 prefilled) | Creation and lookup rules live in one place |
 | Facade | `WorkflowService` | One simple API over states, persistence and events; every transition takes the same audited path |
 | Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener` | Side effects decoupled from the workflow |
-| Strategy | `ReviewDecisionHandler` + `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`; `EmailPolicy` + `PatternEmailPolicy` (institution email rules, swappable per institution) | Add a decision or an email rule by adding a class |
+| Strategy | `ReviewDecisionHandler` + `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`; `EmailPolicy` + `PatternEmailPolicy` (institution email rules, swappable per institution); `NotificationChannel` + `InAppNotificationChannel`, `EmailNotificationChannel` chosen by `NotificationDispatcher` from configuration | Add a decision, an email rule or a delivery channel by adding a class |
 | Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects` | One composable query for every list filter instead of a repository method per combination |
 | Repository | `UserRepository`, `ProjectRepository`, `ProposalVersionRepository`, `ReviewRepository`, `AuditLogRepository`, `NotificationRepository` | Persistence abstraction (Spring Data JPA) |
 | Builder | `AuditLog.builder()` / `AuditLog.Builder` | Readable construction with optional fields |
@@ -2305,6 +2372,8 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `UserServiceTest` | coordinator creates FACULTY and COORDINATOR without the student pattern; other callers 403; STUDENT, other domain and duplicate email rejected |
 | `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400 |
 | `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project |
+| `NotificationDispatcherTest` | every enabled channel called in configured order; a throwing channel does not stop the others; a channel left out of the configuration is never called; unknown channel name rejected |
+| `NotificationChannelTest` | in-app channel stores through `NotificationService.create`; email channel only logs; the shipped `application.yml` enables `in-app` and `email` |
 | `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding and the page envelope (`content`, `page`, `size`, `totalElements`, `totalPages`); defaults for a call without parameters; 400 `VALIDATION_FAILED` for an unknown status or sort, a malformed reviewer id, a negative or non-numeric page and size 0 or 51; summary body |
 
 All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed.
@@ -2325,7 +2394,7 @@ PlantUML sources are in `docs/uml/*.puml` (shared style `_style.iuml`), rendered
 | Sequence: illegal transition rejected | `08_seq_illegal_transition` |
 | ER diagram | `10_er` |
 | Component / architecture | `11_component_architecture` |
-| Observer and Strategy | `12_events_and_strategies` |
+| Observer and Strategy (events, review decisions, email policy, notification channels) | `12_events_and_strategies` |
 
 ### Use cases
 

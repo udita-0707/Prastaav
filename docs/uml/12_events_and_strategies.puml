@@ -1,6 +1,6 @@
 @startuml 12_events_and_strategies
 !include _style.iuml
-title Prastav - Observer (domain events) and Strategy (review decisions, email policy)
+title Prastav - Observer (domain events) and Strategy (review decisions, email policy, notification channels)
 hide empty members
 
 package "Observer: events" {
@@ -68,6 +68,33 @@ package "Strategy: institution email policy" {
   }
   AuthService --> EmailPolicy : requireStudent()
   UserService --> EmailPolicy : requireInstitutional()
+}
+
+package "Strategy: notification channels" {
+  interface NotificationChannel {
+    + name() : String
+    + deliver(notification : Notification)
+  }
+  class InAppNotificationChannel {
+    - notificationService : NotificationService
+  }
+  class EmailNotificationChannel
+  NotificationChannel <|.. InAppNotificationChannel
+  NotificationChannel <|.. EmailNotificationChannel
+
+  class NotificationDispatcher {
+    - enabledChannels : List<NotificationChannel>
+    + dispatch(notification : Notification)
+  }
+  class NotificationProperties <<record>> {
+    + enabledChannels() : List<String>
+  }
+  NotificationDispatcher o--> NotificationChannel
+  NotificationDispatcher ..> NotificationProperties : enabled-channels
+  class NotificationService {
+    + create(recipient, project, type, message) : Notification
+  }
+  InAppNotificationChannel --> NotificationService : create()
 }
 
 class WorkflowService <<Facade>>
