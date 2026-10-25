@@ -449,7 +449,7 @@ erDiagram
     VARCHAR email UK
     VARCHAR password_hash
     VARCHAR role
-    INTEGER admission_year "nullable, indexed with branch"
+    INTEGER admission_year "nullable; idx_users_admission_year_branch with branch"
     VARCHAR branch "nullable"
     TIMESTAMPTZ created_at
   }
@@ -459,17 +459,17 @@ erDiagram
     TEXT description
     VARCHAR tech_stack
     TEXT team_members
-    UUID owner_id FK
-    UUID reviewer_id FK
-    VARCHAR status
+    UUID owner_id FK "idx_projects_owner"
+    UUID reviewer_id FK "idx_projects_reviewer"
+    VARCHAR status "idx_projects_status"
     BIGINT version
     TIMESTAMPTZ created_at
-    TIMESTAMPTZ updated_at
+    TIMESTAMPTZ updated_at "idx_projects_updated_at"
   }
   proposal_versions {
     UUID id PK
-    UUID project_id FK
-    INTEGER version_number
+    UUID project_id FK "ux_proposal_one_open_draft (WHERE state = DRAFT)"
+    INTEGER version_number "uq_proposal_project_version with project_id"
     TEXT problem_statement
     TEXT objectives
     TEXT methodology
@@ -483,7 +483,7 @@ erDiagram
   }
   reviews {
     UUID id PK
-    UUID project_id FK
+    UUID project_id FK "idx_reviews_project"
     UUID proposal_version_id FK
     UUID reviewer_id FK
     VARCHAR decision
@@ -492,7 +492,7 @@ erDiagram
   }
   audit_logs {
     UUID id PK
-    UUID project_id FK
+    UUID project_id FK "idx_audit_logs_project with created_at"
     UUID actor_id FK
     VARCHAR action
     VARCHAR from_status
@@ -502,7 +502,7 @@ erDiagram
   }
   notifications {
     UUID id PK
-    UUID recipient_id FK "indexed with is_read and with created_at"
+    UUID recipient_id FK "idx_notifications_recipient_read with is_read; idx_notifications_recipient_created with created_at"
     UUID project_id FK "nullable"
     VARCHAR type
     VARCHAR message
