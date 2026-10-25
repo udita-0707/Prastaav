@@ -2,7 +2,6 @@ package com.prastav.project.web;
 
 import com.prastav.auth.Actor;
 import com.prastav.project.ProjectHistoryService;
-import com.prastav.project.ProjectListItem;
 import com.prastav.project.ProjectListQuery;
 import com.prastav.project.ProjectService;
 import com.prastav.project.ProjectSort;
@@ -13,9 +12,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.springframework.data.domain.Page;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -58,28 +55,23 @@ public class ProjectController {
                 projectService.createProject(request.toNewProject(), request.proposalOrEmpty(), actor));
     }
 
-    /** Header carrying the number of matching projects across all pages. */
-    static final String TOTAL_COUNT_HEADER = "X-Total-Count";
-
     @GetMapping
-    @Operation(summary = "Role-scoped project list with optional filters and paging",
-            description = "Without page the whole filtered list is returned. X-Total-Count always holds the match count.")
-    public ResponseEntity<List<ProjectSummaryResponse>> list(
+    @Operation(summary = "Role-scoped, paged project list with optional filters",
+            description = "Students see their own projects, faculty their assigned ones, the coordinator all. "
+                    + "A negative page or a size outside 1 to 50 is rejected with VALIDATION_FAILED.")
+    public ProjectPageResponse list(
             @Parameter(description = "One or more statuses (repeat the parameter or separate with commas)")
             @RequestParam(required = false) List<ProjectStatus> status,
             @Parameter(description = "Text matched against title, description, team, owner and reviewer names")
             @RequestParam(required = false) String q,
             @RequestParam(required = false) UUID reviewerId,
             @RequestParam(required = false) ProjectSort sort,
-            @Parameter(description = "Zero-based page index") @RequestParam(required = false) Integer page,
-            @Parameter(description = "Page size, 1 to 100 (default 10)") @RequestParam(required = false) Integer size,
+            @Parameter(description = "Zero-based page index (default 0)") @RequestParam(required = false) Integer page,
+            @Parameter(description = "Page size, 1 to 50 (default 10)") @RequestParam(required = false) Integer size,
             @AuthenticationPrincipal Actor actor) {
-        ProjectListQuery query = new ProjectListQuery(
+        ProjectListQuery query = ProjectListQuery.of(
                 status == null ? null : new HashSet<>(status), q, reviewerId, sort, page, size);
-        Page<ProjectListItem> result = projectService.listProjects(actor, query);
-        return ResponseEntity.ok()
-                .header(TOTAL_COUNT_HEADER, String.valueOf(result.getTotalElements()))
-                .body(result.map(ProjectMapper::toSummary).getContent());
+        return ProjectMapper.toPage(projectService.listProjects(actor, query));
     }
 
     @GetMapping("/summary")

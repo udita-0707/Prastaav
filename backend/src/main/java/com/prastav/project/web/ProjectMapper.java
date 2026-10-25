@@ -6,6 +6,7 @@ import com.prastav.project.ProjectCounts;
 import com.prastav.project.ProjectListItem;
 import com.prastav.project.ProjectView;
 import com.prastav.proposal.web.ProposalMapper;
+import org.springframework.data.domain.Page;
 
 import java.util.List;
 
@@ -20,6 +21,11 @@ public final class ProjectMapper {
         return new ProjectSummaryResponse(project.getId(), project.getTitle(), project.getDescription(),
                 project.getTeamMembers(), project.getStatus(), UserMapper.toSummary(project.getOwner()),
                 UserMapper.toSummary(project.getReviewer()), item.submittedAt(), project.getUpdatedAt());
+    }
+
+    public static ProjectPageResponse toPage(Page<ProjectListItem> page) {
+        return new ProjectPageResponse(page.map(ProjectMapper::toSummary).getContent(), page.getNumber(),
+                page.getSize(), page.getTotalElements(), page.getTotalPages());
     }
 
     public static ProjectCountsResponse toCounts(ProjectCounts counts) {
