@@ -19,15 +19,13 @@ node "prastav-backend (Spring Boot 3, Java 17)" {
     component "review\n(ReviewService,\nReviewDecisionHandler x3)" as REV
     component "workflow\n(WorkflowService, ProjectState x6,\nProjectStateFactory)" as WF
     component "audit\n(AuditEventListener,\nAuditRecorder, AuditQueryService)" as AUD
-    component "notification" as NOTIF <<M2>>
-    component "dashboard" as DASH <<M2>>
+    component "notification\n(NotificationService)" as NOTIF
   }
   component "Spring Data JPA repositories" as REPO
   component "Flyway migrations" as FLY
 }
 
 database "PostgreSQL 16\n(docker-compose)" as DB
-component "Docker images +\nGitHub Actions CI" as CI <<M2>>
 
 FE --> SEC : REST + Bearer JWT\n(/api, proxied by Vite)
 SEC --> WEB
@@ -44,9 +42,7 @@ WF ..> AUD : domain events (Observer)
 PROJ ..> AUD : events
 PROP ..> AUD : events
 REV ..> AUD : events
-WF ..> NOTIF : events
 NOTIF --> REPO
-DASH --> REPO
 AUTH --> REPO
 PROJ --> REPO
 PROP --> REPO
@@ -54,5 +50,4 @@ REV --> REPO
 AUD --> REPO
 REPO --> DB
 FLY --> DB
-CI ..> FE
 @enduml

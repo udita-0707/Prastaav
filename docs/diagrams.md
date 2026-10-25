@@ -1,7 +1,7 @@
 # Prastav diagrams (Mermaid)
 
 The same diagrams as the PlantUML sources in `docs/uml/*.puml` (rendered PNGs in `docs/uml/png/`).
-Names match the code exactly. **Milestone 2 elements are grey with a dashed border and carry `<<M2>>` or `[M2]`.**
+Names match the code exactly, and every element exists in the code.
 Mermaid renders of these blocks are in `docs/uml/mermaid-png/`.
 
 ## 1. Use cases
@@ -19,21 +19,14 @@ flowchart LR
   UC6["Create revision vN+1"]
   UC7["Assign faculty reviewer"]
   UC8["Review latest submitted version"]
-  UC9["View project timeline (API)"]
+  UC9["View project timeline"]
   UC10["View all projects"]
-  M2a["[M2] Reassign reviewer"]:::m2
-  M2b["[M2] In-app notifications"]:::m2
-  M2c["[M2] Compare two versions"]:::m2
-  M2d["[M2] Dashboard"]:::m2
-  M2e["[M2] Audit log viewer"]:::m2
-  M2f["[M2] Filter / search / paginate"]:::m2
-  Student --> UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC9
-  Faculty --> UC1 & UC8 & UC5
-  Coordinator --> UC1 & UC7 & UC10 & UC9
-  Coordinator -.-> M2a & M2d & M2e & M2f
-  Student -.-> M2b & M2c
-  Faculty -.-> M2b & M2c
-  classDef m2 fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
+  UC11["Filter, search and page project lists"]
+  UC12["View dashboard counts by status"]
+  UC13["Create faculty or coordinator account"]
+  Student --> UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC9 & UC11 & UC12
+  Faculty --> UC1 & UC8 & UC5 & UC11 & UC12
+  Coordinator --> UC1 & UC7 & UC10 & UC9 & UC11 & UC12 & UC13
 ```
 
 ## 2. Domain class diagram
@@ -283,13 +276,6 @@ classDiagram
     toStatus
     details
   }
-  class ReassignReviewer {
-    <<M2>>
-    ProjectState.reassignReviewer()
-    UnderReviewState.reassignReviewer()
-    WorkflowService.reassignReviewer()
-    Action.REASSIGN_REVIEWER
-  }
   ProjectStateFactory o--> ProjectState
   WorkflowService --> ProjectStateFactory
   WorkflowService --> ProjectStore
@@ -298,9 +284,6 @@ classDiagram
   ProjectState ..> IllegalTransitionException : throws
   DraftState ..> Guards
   UnderReviewState ..> Guards
-  ReassignReviewer .. UnderReviewState
-  classDef m2 fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
-  style ReassignReviewer fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
 ```
 
 ## 4. Project state diagram with guards
@@ -314,12 +297,10 @@ stateDiagram-v2
   UNDER_REVIEW --> REVISION_REQUESTED : requestRevision [assigned faculty, comments]
   UNDER_REVIEW --> REJECTED : reject [assigned faculty, comments]
   REVISION_REQUESTED --> UNDER_REVIEW : submit (resubmit) [owner, vN+1 complete, reviewer set]
-  UNDER_REVIEW --> UNDER_REVIEW : [M2] reassignReviewer [COORDINATOR]
   APPROVED --> [*]
   REJECTED --> [*]
   note right of UNDER_REVIEW
     Anything not drawn throws IllegalTransitionException (409).
-    The reassignReviewer loop is M2 Planned.
   end note
 ```
 
@@ -448,29 +429,7 @@ sequenceDiagram
   GEH-->>Faculty: 409 {code: ILLEGAL_TRANSITION}
 ```
 
-## 9. Sequence: [M2 Planned] notification flow
-
-```mermaid
-sequenceDiagram
-  autonumber
-  participant WS as WorkflowService
-  participant BUS as Spring event bus
-  participant AEL as AuditEventListener
-  participant NL as [M2] NotificationListener
-  participant NS as [M2] NotificationService
-  participant IN as [M2] InAppNotificationChannel
-  participant EM as [M2] EmailNotificationChannel
-  WS->>BUS: ProjectStatusChangedEvent
-  BUS->>AEL: on(event) (M1, unchanged)
-  rect rgb(238, 238, 238)
-    BUS-->>NL: on(event)
-    NL-->>NS: notify(owner, REVIEW_DECISION, message)
-    NS-->>IN: send(notification) - save row
-    NS-->>EM: send(notification) - stub, log only
-  end
-```
-
-## 10. ER diagram
+## 9. ER diagram
 
 ```mermaid
 erDiagram
@@ -552,7 +511,7 @@ erDiagram
   }
 ```
 
-## 11. Component / architecture
+## 10. Component / architecture
 
 ```mermaid
 flowchart TB
@@ -566,13 +525,11 @@ flowchart TB
     REV["review: ReviewService, ReviewDecisionHandler x3"]
     WF["workflow: WorkflowService, ProjectState x6, ProjectStateFactory"]
     AUD["audit: AuditEventListener, AuditRecorder, AuditQueryService"]
-    NOTIF["[M2] notification"]:::m2
-    DASH["[M2] dashboard"]:::m2
+    NOTIF["notification: NotificationService"]
     REPO["Spring Data JPA repositories"]
     FLY["Flyway migrations"]
   end
   DB[("PostgreSQL 16 (docker-compose)")]
-  CI["[M2] Docker images + GitHub Actions CI"]:::m2
   FE -->|"REST + Bearer JWT"| SEC --> WEB
   WEB --> AUTH & PROJ & PROP & REV & WF
   REV -->|strategies| WF
@@ -582,16 +539,13 @@ flowchart TB
   PROJ -.->|events| AUD
   PROP -.->|events| AUD
   REV -.->|events| AUD
-  WF -.->|events| NOTIF
   AUTH & PROJ & PROP & REV & AUD --> REPO
-  NOTIF & DASH --> REPO
+  NOTIF --> REPO
   REPO --> DB
   FLY --> DB
-  CI -.-> BE
-  classDef m2 fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
 ```
 
-## 12. Observer and Strategy
+## 11. Observer and Strategy
 
 ```mermaid
 classDiagram
@@ -646,34 +600,4 @@ classDiagram
   }
   AuthService --> EmailPolicy : requireStudent()
   UserService --> EmailPolicy : requireInstitutional()
-  class NotificationListener {
-    <<M2>>
-    +on(ProjectStatusChangedEvent)
-  }
-  class NotificationService {
-    <<M2>>
-    -List~NotificationChannel~ channels
-    +notify(User user, NotificationType type, String message)
-  }
-  class NotificationChannel {
-    <<M2>>
-    +name() String
-    +send(Notification notification)
-  }
-  class InAppNotificationChannel {
-    <<M2>>
-  }
-  class EmailNotificationChannel {
-    <<M2>>
-  }
-  NotificationListener --> NotificationService
-  NotificationService o--> NotificationChannel
-  NotificationChannel <|.. InAppNotificationChannel
-  NotificationChannel <|.. EmailNotificationChannel
-  classDef m2 fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
-  style NotificationListener fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
-  style NotificationService fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
-  style NotificationChannel fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
-  style InAppNotificationChannel fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
-  style EmailNotificationChannel fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
 ```
