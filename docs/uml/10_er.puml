@@ -15,7 +15,7 @@ entity users {
   branch : VARCHAR(20)
   * created_at : TIMESTAMPTZ
   --
-  idx (admission_year, branch)
+  idx_users_admission_year_branch (admission_year, branch)
 }
 
 entity projects {
@@ -31,6 +31,11 @@ entity projects {
   * version : BIGINT (optimistic lock)
   * created_at : TIMESTAMPTZ
   * updated_at : TIMESTAMPTZ
+  --
+  idx_projects_owner (owner_id)
+  idx_projects_reviewer (reviewer_id)
+  idx_projects_status (status)
+  idx_projects_updated_at (updated_at)
 }
 
 entity proposal_versions {
@@ -49,8 +54,8 @@ entity proposal_versions {
   * created_by : UUID <<FK users>>
   * created_at : TIMESTAMPTZ
   ..
-  UNIQUE (project_id, version_number)
-  UNIQUE (project_id) WHERE state = 'DRAFT'
+  uq_proposal_project_version UNIQUE (project_id, version_number)
+  ux_proposal_one_open_draft UNIQUE (project_id) WHERE state = 'DRAFT'
   trigger: no UPDATE/DELETE when SUBMITTED
 }
 
@@ -65,6 +70,8 @@ entity reviews {
   * created_at : TIMESTAMPTZ
   ..
   CHECK comments required unless APPROVE
+  --
+  idx_reviews_project (project_id)
 }
 
 entity audit_logs {
@@ -79,6 +86,8 @@ entity audit_logs {
   * created_at : TIMESTAMPTZ
   ..
   trigger: append-only
+  --
+  idx_audit_logs_project (project_id, created_at)
 }
 
 entity notifications {
@@ -91,8 +100,8 @@ entity notifications {
   * is_read : BOOLEAN
   * created_at : TIMESTAMPTZ
   --
-  idx (recipient_id, is_read)
-  idx (recipient_id, created_at)
+  idx_notifications_recipient_read (recipient_id, is_read)
+  idx_notifications_recipient_created (recipient_id, created_at)
 }
 
 users ||--o{ projects : owns
