@@ -12,30 +12,62 @@ function parseStatuses(raw: string | null): ProjectStatus[] {
   return raw.split(',').filter((s): s is ProjectStatus => s in STATUS_LABEL);
 }
 
+function parseYear(raw: string | null): number | undefined {
+  const year = Number(raw);
+  return raw && Number.isInteger(year) && year > 0 ? year : undefined;
+}
+
 interface Defaults {
   status?: ProjectStatus[];
   sort?: ProjectSort;
 }
 
+type Update = (patch: Record<string, string | undefined>) => void;
+
+/** A text box whose value is written to the URL after a short pause, and follows the URL when something else changes it. */
+function useDebouncedParam(urlValue: string, key: string, update: Update, normalize: (value: string) => string) {
+  const [value, setValue] = useState(urlValue);
+  const pushed = useRef(urlValue);
+  const debounced = useDebouncedValue(value);
+  useEffect(() => {
+    if (urlValue !== pushed.current) {
+      pushed.current = urlValue;
+      setValue(urlValue);
+    }
+  }, [urlValue]);
+  useEffect(() => {
+    const next = normalize(debounced);
+    if (next !== pushed.current) {
+      pushed.current = next;
+      update({ [key]: next || undefined });
+    }
+  }, [debounced]);
+  return [value, setValue] as const;
+}
+
 /**
- * List filters live in the URL (status, q, reviewerId, sort, page) so a filtered list can be shared or bookmarked.
- * The search box updates the URL after a short pause; any other change goes back to the first page.
+ * List filters live in the URL (status, q, reviewerId, admissionYear, branch, sort, page) so a filtered list can be
+ * shared or bookmarked. The search and branch boxes update the URL after a short pause; any other change goes back
+ * to the first page.
  */
 export function useProjectListParams(defaults: Defaults = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlQ = searchParams.get('q') ?? '';
+  const urlBranch = searchParams.get('branch') ?? '';
   const statuses = searchParams.has('status') ? parseStatuses(searchParams.get('status')) : defaults.status ?? [];
   const sortParam = searchParams.get('sort') as ProjectSort | null;
   const params: ProjectListParams = {
     status: statuses,
     q: urlQ || undefined,
     reviewerId: searchParams.get('reviewerId') || undefined,
+    admissionYear: parseYear(searchParams.get('admissionYear')),
+    branch: urlBranch || undefined,
     sort: sortParam && SORTS.includes(sortParam) ? sortParam : defaults.sort ?? 'LATEST',
     page: Math.max(0, Number(searchParams.get('page') ?? 0) || 0),
     size: PAGE_SIZE,
   };
 
-  const update = (patch: Record<string, string | undefined>) => {
+  const update: Update = (patch) => {
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -50,30 +82,19 @@ export function useProjectListParams(defaults: Defaults = {}) {
     );
   };
 
-  // The search input is local so typing stays smooth; it follows the URL when something else changes q.
-  const [search, setSearch] = useState(urlQ);
-  const pushed = useRef(urlQ);
-  const debounced = useDebouncedValue(search);
-  useEffect(() => {
-    if (urlQ !== pushed.current) {
-      pushed.current = urlQ;
-      setSearch(urlQ);
-    }
-  }, [urlQ]);
-  useEffect(() => {
-    const term = debounced.trim();
-    if (term !== pushed.current) {
-      pushed.current = term;
-      update({ q: term || undefined });
-    }
-  }, [debounced]);
+  // The text inputs are local so typing stays smooth.
+  const [search, setSearch] = useDebouncedParam(urlQ, 'q', update, (value) => value.trim());
+  const [branch, setBranch] = useDebouncedParam(urlBranch, 'branch', update, (value) => value.trim().toUpperCase());
 
   return {
     params,
     search,
     setSearch,
+    branch,
+    setBranch,
     setStatus: (value: string) => update({ status: value || undefined }),
     setReviewer: (value: string) => update({ reviewerId: value || undefined }),
+    setAdmissionYear: (value: string) => update({ admissionYear: value || undefined }),
     setSort: (value: ProjectSort) => update({ sort: value === (defaults.sort ?? 'LATEST') ? undefined : value }),
     setPage: (page: number) => update({ page: page > 0 ? String(page) : undefined }),
   };

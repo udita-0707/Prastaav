@@ -79,6 +79,10 @@ export interface ProjectListParams {
   status?: ProjectStatus[];
   q?: string;
   reviewerId?: string;
+  /** Coordinator only: the project owner's admission year, e.g. 2023. */
+  admissionYear?: number;
+  /** Coordinator only: the project owner's branch, e.g. CSAI. */
+  branch?: string;
   sort?: ProjectSort;
   page?: number;
   size?: number;
@@ -97,6 +101,10 @@ export interface ProjectPage {
   items: ProjectSummaryResponse[];
   /** Matches across all pages. */
   total: number;
+  /** Zero-based page index the server returned. */
+  page: number;
+  size: number;
+  totalPages: number;
 }
 
 export interface ProjectCountsResponse {

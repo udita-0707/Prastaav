@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { ArrowRight, ArrowUpDown, CheckCircle2, Eye, FileText, FilePen, Filter, PencilLine, Plus, UserPlus, UserRoundSearch, UserSearch } from 'lucide-react';
-import { useState, type ReactNode } from 'react';
+import { ArrowRight, ArrowUpDown, CheckCircle2, Eye, FileText, FilePen, Filter, GitBranch, GraduationCap, PencilLine, Plus, UserPlus, UserRoundSearch, UserSearch } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { errorMessage } from '../api/client';
 import { getProjectCounts, listFaculty, listProjects } from '../api/endpoints';
@@ -9,7 +9,7 @@ import { illustrations } from '../assets';
 import { useAuth } from '../auth/AuthContext';
 import { ErrorNote } from '../components/ErrorNote';
 import { STATUS_LABEL } from '../components/labels';
-import { Button, ButtonLink, Card, CtaBand, DataTable, DropdownMenu, EmptyState, FilterBar, PageHeader, Pagination, SearchField, Select, StatCard, type Column } from '../components/ui';
+import { Button, ButtonLink, Card, CtaBand, DataTable, DropdownMenu, EmptyState, FilterBar, Input, PageHeader, Pagination, SearchField, Select, StatCard, type Column } from '../components/ui';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
 import { useProjectListParams } from '../lib/useProjectListParams';
 import { AssignDialog, type AssignTarget } from './projects/AssignDialog';
@@ -25,6 +25,14 @@ const HEADING: Record<Role, { title: string; description: string; empty: string 
 
 const SORT_LABEL: Record<ProjectSort, string> = { LATEST: 'Latest', OLDEST: 'Oldest', TITLE: 'Title' };
 const STATUSES = Object.keys(STATUS_LABEL) as ProjectStatus[];
+const BATCH_YEARS_SHOWN = 6;
+
+/** Admission years offered by the batch filter: this year and the five before it, plus a year already in the URL. */
+function batchYears(selected?: number): number[] {
+  const thisYear = new Date().getFullYear();
+  const years = Array.from({ length: BATCH_YEARS_SHOWN }, (_, i) => thisYear - i);
+  return selected && !years.includes(selected) ? [...years, selected].sort((a, b) => b - a) : years;
+}
 
 function columnsFor(role: Role, mode: Mode, onAssign: (target: AssignTarget) => void): Column<ProjectSummaryResponse>[] {
   const actions: Column<ProjectSummaryResponse> = {
@@ -115,14 +123,31 @@ function ProjectsList({ user, mode }: { user: UserResponse; mode: Mode }) {
     : HEADING[role];
   useDocumentTitle(heading.title);
 
-  const { params, search, setSearch, setStatus, setReviewer, setSort, setPage } = useProjectListParams(isReviews ? { status: ['UNDER_REVIEW'], sort: 'OLDEST' } : {});
+  const { params, search, setSearch, branch, setBranch, setStatus, setReviewer, setAdmissionYear, setSort, setPage } = useProjectListParams(
+    isReviews ? { status: ['UNDER_REVIEW'], sort: 'OLDEST' } : {},
+  );
   const projects = useQuery({ queryKey: ['projects', 'list', params], queryFn: () => listProjects(params), placeholderData: keepPreviousData });
   const faculty = useQuery({ queryKey: ['faculty'], queryFn: listFaculty, enabled: role === 'COORDINATOR' });
   const [assignTarget, setAssignTarget] = useState<AssignTarget | null>(null);
 
   const statusValue = params.status?.join(',') ?? '';
-  const filtered = Boolean(params.q || params.reviewerId || (!isReviews && statusValue));
+  const filtered = Boolean(params.q || params.reviewerId || params.admissionYear || params.branch || (!isReviews && statusValue));
   const columns = columnsFor(role, mode, setAssignTarget);
+  const clearFilters = () => {
+    setSearch('');
+    setBranch('');
+    setStatus('');
+    setReviewer('');
+    setAdmissionYear('');
+  };
+
+  // A page that no longer exists (rows removed, or a shared link to an old page) jumps back to the last real page.
+  const pageData = projects.data;
+  useEffect(() => {
+    if (pageData && pageData.items.length === 0 && pageData.total > 0 && pageData.page >= pageData.totalPages) {
+      setPage(pageData.totalPages - 1);
+    }
+  }, [pageData]);
 
   let actions: ReactNode = null;
   if (role === 'STUDENT' && !isReviews) {
@@ -169,6 +194,28 @@ function ProjectsList({ user, mode }: { user: UserResponse; mode: Mode }) {
               ))}
             </Select>
           )}
+          {role === 'COORDINATOR' && (
+            <Select aria-label="Filter by batch year" icon={<GraduationCap className="h-4 w-4" />} value={params.admissionYear ?? ''} onChange={(e) => setAdmissionYear(e.target.value)} wrapperClassName="md:w-44">
+              <option value="">All batches</option>
+              {batchYears(params.admissionYear).map((year) => (
+                <option key={year} value={year}>
+                  Batch {year}
+                </option>
+              ))}
+            </Select>
+          )}
+          {role === 'COORDINATOR' && (
+            <Input
+              aria-label="Filter by branch"
+              icon={<GitBranch className="h-4 w-4" />}
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              placeholder="Branch, e.g. CSAI"
+              maxLength={20}
+              className="uppercase placeholder:normal-case"
+              wrapperClassName="md:w-44"
+            />
+          )}
           <Select aria-label="Sort projects" icon={<ArrowUpDown className="h-4 w-4" />} value={params.sort} onChange={(e) => setSort(e.target.value as ProjectSort)} wrapperClassName="md:w-44">
             {(Object.keys(SORT_LABEL) as ProjectSort[]).map((s) => (
               <option key={s} value={s}>
@@ -192,14 +239,7 @@ function ProjectsList({ user, mode }: { user: UserResponse; mode: Mode }) {
                 title="No projects match"
                 description="Try a different search or clear the filters."
                 action={
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setSearch('');
-                      setStatus('');
-                      setReviewer('');
-                    }}
-                  >
+                  <Button variant="outline" onClick={clearFilters}>
                     Clear filters
                   </Button>
                 }
@@ -220,7 +260,7 @@ function ProjectsList({ user, mode }: { user: UserResponse; mode: Mode }) {
           }
         />
 
-        {projects.data && <Pagination page={params.page ?? 0} size={params.size ?? 10} total={projects.data.total} onChange={setPage} />}
+        {projects.data && <Pagination page={projects.data.page} size={projects.data.size} total={projects.data.total} onChange={setPage} />}
       </Card>
 
       {role === 'COORDINATOR' && !isReviews && (
