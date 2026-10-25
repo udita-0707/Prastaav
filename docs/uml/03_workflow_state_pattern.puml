@@ -116,12 +116,4 @@ UnderReviewState ..> Guards
 RevisionRequestedState ..> Guards
 ProjectState ..> IllegalTransitionException : throws
 ProjectState ..> Action
-
-class "reassignReviewer" as Reassign <<M2>> {
-  ProjectState.reassignReviewer(project, faculty, actor)
-  UnderReviewState.reassignReviewer(...)
-  WorkflowService.reassignReviewer(projectId, facultyId, actor)
-  Action.REASSIGN_REVIEWER
-}
-Reassign .. UnderReviewState : <<M2>> adds
 @enduml

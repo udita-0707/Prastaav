@@ -17,7 +17,7 @@ Each status owns its rules in one small class (`DraftState`, `UnderReviewState`,
 A reviewer's decision must refer to exactly the text they read, and the audit trail must be trustworthy. It is enforced in three layers: `ProposalVersion.updateContent()` and `submit()` throw `ConflictException` once SUBMITTED; `ProposalService.updateDraft` first asks the state whether EDIT_DRAFT is allowed (409 otherwise); and the database trigger `trg_proposal_versions_immutable` rejects any UPDATE or DELETE on a submitted row, even from SQL. Changes after submission happen only by creating version N+1 through `ProposalVersionFactory.nextDraftFrom`.
 
 **5. Why events for auditing, and why is the audit listener synchronous?**
-The workflow should not know auditing exists (SRP), and a new side effect is a new listener, not an edit to `WorkflowService` (OCP). The listener is a plain `@EventListener`, so it runs inside the publisher's transaction: an audit row exists if and only if the change committed. The planned M2 `NotificationListener` will instead use `@TransactionalEventListener(AFTER_COMMIT)`, because a notification must never be sent for a change that rolled back. That difference is deliberate.
+The workflow should not know auditing exists (SRP), and a new side effect is a new listener, not an edit to `WorkflowService` (OCP). The listener is a plain `@EventListener`, so it runs inside the publisher's transaction: an audit row exists if and only if the change committed. A notification listener would instead use `@TransactionalEventListener(AFTER_COMMIT)`, because a notification must never be sent for a change that rolled back. That difference is deliberate.
 
 **6. How do you stop two people changing the same project at the same time?**
 `Project` has `@Version Long version`. Hibernate adds `WHERE version = ?` to the update; if another transaction committed first, the update hits zero rows and Spring throws `OptimisticLockingFailureException`, which `GlobalExceptionHandler` turns into 409 `CONCURRENT_UPDATE`. If the second request arrives after the first committed, it simply loads the new status and the state refuses it with 409 `ILLEGAL_TRANSITION`. The partial unique index `ux_proposal_one_open_draft` also stops two concurrent "create revision" calls from producing two drafts.
@@ -29,7 +29,7 @@ Layer 1 is the role, checked at the endpoint with `@PreAuthorize` (cheap, declar
 `GET /api/projects/{id}` returns `allowedActions`, computed by `AllowedActionsResolver` from the current state's `availableActions()` filtered by who the caller is. The React detail page renders buttons only from that list and never reasons about statuses itself, so the UI cannot drift from the backend rules. The backend still re-validates every call, so hiding a button is a convenience, not a security measure.
 
 **9. Isn't the Strategy pattern for three review decisions over-engineering?**
-For exactly three fixed decisions a switch would work. The handler interface earns its place because each decision maps to a different workflow call with different inputs, `ReviewService` stays closed for modification when a decision is added (for example a conditional approval), and the same lookup-by-key structure is reused for M2 notification channels. The cost is three tiny classes. I would not add a strategy where there is no expected variation.
+For exactly three fixed decisions a switch would work. The handler interface earns its place because each decision maps to a different workflow call with different inputs, `ReviewService` stays closed for modification when a decision is added (for example a conditional approval), and the same lookup-by-key structure fits any other per-key behaviour, such as notification channels. The cost is three tiny classes. I would not add a strategy where there is no expected variation.
 
 **10. How do you test the workflow without Spring or a database?**
 State classes, entities and `Guards` are plain Java, so tests build real objects (`TestData.projectIn(UNDER_REVIEW, owner, reviewer)`) and call the state directly. Services get their collaborators through constructors, so `WorkflowServiceTest` and `ReviewServiceTest` use Mockito mocks for `ProjectStore`, `ProposalService` and `ApplicationEventPublisher` but real states via `TestData.stateFactory()`. `ProjectStore` is the seam that makes this easy. Only `ProjectControllerWebTest` starts a Spring slice (`@WebMvcTest`) to prove JWT, `@PreAuthorize` and error mapping.
@@ -48,7 +48,7 @@ State classes, entities and `Guards` are plain Java, so tests build real objects
 | `workflow/WorkflowService.java` | add `hold(UUID, Actor, String)` and `resume(UUID, Actor)` using the private `transition(...)` |
 | `workflow/AllowedActionsResolver.java` | add `case HOLD, RESUME -> actor.hasRole(Role.COORDINATOR);` (the compiler forces this because the switch is exhaustive) |
 | `project/web/ProjectController.java` | `POST /api/projects/{id}/hold` and `/resume` with `@PreAuthorize("hasRole('COORDINATOR')")` |
-| `backend/src/main/resources/db/migration/V2__on_hold_status.sql` (new) | `ALTER TABLE projects DROP CONSTRAINT projects_status_check;` then add it back including `'ON_HOLD'` |
+| `backend/src/main/resources/db/migration/V5__on_hold_status.sql` (new) | `ALTER TABLE projects DROP CONSTRAINT projects_status_check;` then add it back including `'ON_HOLD'` |
 | `backend/src/test/java/com/prastav/support/TestData.java` | add `new OnHoldState()` to `stateFactory()` (otherwise the factory fails fast, by design) |
 | `backend/src/test/java/com/prastav/workflow/OnHoldStateTest.java` (new) | resume legal for coordinator; everything else illegal; UnderReviewState hold tests |
 | `frontend/src/api/types.ts`, `components/labels.ts`, `components/StatusBadge` CSS in `styles.css`, `components/WorkflowRail.tsx`, `pages/ProjectDetailPage.tsx` | new status and action, badge colour, buttons |
@@ -61,7 +61,7 @@ Nothing in `AuditEventListener` changes: HOLD and RESUME fall into STATUS_CHANGE
 | File | Change |
 |---|---|
 | `auth/Role.java` | add `REVIEW_COMMITTEE` |
-| `backend/src/main/resources/db/migration/V2__review_committee_role.sql` (new) | replace `users_role_check` to include the new value |
+| `backend/src/main/resources/db/migration/V5__review_committee_role.sql` (new) | replace `users_role_check` to include the new value |
 | `project/ProjectService.java` | `listProjects` switch: `case REVIEW_COMMITTEE -> projectRepository.findAllByOrderByUpdatedAtDesc();` (compiler forces a case) |
 | `project/ProjectAccessPolicy.java` | `canView` returns true for `REVIEW_COMMITTEE` |
 | `auth/AuthService.java` | keep it out of self-registration (same rule as COORDINATOR) |
@@ -77,7 +77,7 @@ Design: a second strategy, `ApprovalPolicy`, decides whether an APPROVE decision
 
 | File | Change |
 |---|---|
-| `backend/src/main/resources/db/migration/V2__project_reviewers.sql` (new) | table `project_reviewers(project_id, reviewer_id, PRIMARY KEY(...))`, migrate existing `reviewer_id` rows, keep or drop the column |
+| `backend/src/main/resources/db/migration/V5__project_reviewers.sql` (new) | table `project_reviewers(project_id, reviewer_id, PRIMARY KEY(...))`, migrate existing `reviewer_id` rows, keep or drop the column |
 | `project/Project.java` | `@ManyToMany Set<User> reviewers`; `assignReviewer` adds; `isReviewedBy` checks the set; `getReviewers()` |
 | `workflow/SubmittedState.java` | allow assignment until two reviewers are set; move to UNDER_REVIEW when the second is added (or accept a list in one call) |
 | `workflow/ApprovalPolicy.java` (new interface) | `boolean isSatisfied(Project project, long approvalsOnLatestVersion)` |
@@ -102,17 +102,17 @@ Version 1 is the original submission, so versions 2, 3 and 4 are the three resub
 | `workflow/AllowedActionsResolver.java` (optional) | hide CREATE_REVISION when the limit is reached |
 | `backend/src/test/java/com/prastav/workflow/RevisionRequestedStateTest.java` | `fourthResubmissionIsRejected` (v5 throws, status stays REVISION_REQUESTED) and `thirdResubmissionIsAllowed` (v4 goes UNDER_REVIEW) |
 
-### B5. How the planned M2 notification channel plugs in
+### B5. Delivering notifications through channels
 
-1. `notification/Notification.java`, `NotificationType.java`, `NotificationRepository.java`, and migration `V2__notifications.sql` (columns in LLD section 9.6).
+1. Already in place: `notification/Notification.java`, `NotificationType.java`, `NotificationRepository.java`, `NotificationService.java` and migration `V4__notifications.sql` (columns in LLD section 9.6).
 2. `notification/NotificationChannel.java`: `String name(); void send(Notification notification);`
 3. `notification/InAppNotificationChannel.java` (`@Component`, saves the row) and `notification/EmailNotificationChannel.java` (`@Component`, logs only).
-4. `notification/NotificationService.java`: constructor takes `List<NotificationChannel>`; `notify(...)` builds the `Notification` and calls `send` on every channel.
+4. `notification/NotificationService.java`: the constructor also takes `List<NotificationChannel>`; `create(...)` builds the `Notification` and calls `send` on every channel.
 5. `notification/NotificationListener.java`: `@TransactionalEventListener(phase = AFTER_COMMIT)` on `ProjectStatusChangedEvent`; maps ASSIGN_REVIEWER to the reviewer, APPROVE/REQUEST_REVISION/REJECT to the owner, resubmission to the reviewer.
 6. `notification/web/NotificationController.java` + `NotificationResponse.java`: `GET /api/notifications`, `PATCH /api/notifications/{id}/read`.
-7. Frontend: notification bell in `components/Layout.tsx`, polling `GET /api/notifications` every 30 seconds with TanStack Query.
+7. Frontend: notification bell in `layouts/AppShell.tsx`, polling `GET /api/notifications` every 30 seconds with TanStack Query.
 
-**No existing workflow, project, proposal or review class changes.** A future channel (for example SMS) is one more `@Component` implementing `NotificationChannel`; Spring injects it into the list automatically. That is the live demonstration of Open/Closed for M2.
+**No existing workflow, project, proposal or review class changes.** A future channel (for example SMS) is one more `@Component` implementing `NotificationChannel`; Spring injects it into the list automatically. That is the live demonstration of Open/Closed.
 
 ## Part C. Two-minute code walk for the demo
 

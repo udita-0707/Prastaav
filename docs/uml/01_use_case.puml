@@ -1,6 +1,6 @@
 @startuml 01_use_case
 !include _style.iuml
-title Prastav - Use cases (M1 implemented, <<M2>> planned)
+title Prastav - Use cases
 left to right direction
 actor Student
 actor Faculty
@@ -15,15 +15,12 @@ rectangle "Prastav" {
   usecase "Create revision vN+1" as UC6
   usecase "Assign faculty reviewer" as UC7
   usecase "Review latest submitted version\n(approve / request revision / reject)" as UC8
-  usecase "View project timeline (API)" as UC9
+  usecase "View project timeline" as UC9
   usecase "View all projects" as UC10
 
-  usecase "Reassign reviewer" as M2a <<M2>>
-  usecase "Receive in-app notifications" as M2b <<M2>>
-  usecase "Compare two versions" as M2c <<M2>>
-  usecase "Dashboard: counts and workload" as M2d <<M2>>
-  usecase "Browse audit log with filters" as M2e <<M2>>
-  usecase "Filter, search, paginate lists" as M2f <<M2>>
+  usecase "Filter, search and page project lists" as UC11
+  usecase "View dashboard counts by status" as UC12
+  usecase "Create faculty or coordinator account" as UC13
 }
 
 Student --> UC1
@@ -41,17 +38,11 @@ Coordinator --> UC7
 Coordinator --> UC10
 Coordinator --> UC9
 
-Coordinator ..> M2a
-Coordinator ..> M2d
-Coordinator ..> M2e
-Student ..> M2b
-Faculty ..> M2b
-Student ..> M2c
-Faculty ..> M2c
-Coordinator ..> M2f
-
-legend right
-  Solid: [M1 Implemented]
-  Grey dashed <<M2>>: [M2 Planned]
-endlegend
+Student --> UC11
+Faculty --> UC11
+Coordinator --> UC11
+Student --> UC12
+Faculty --> UC12
+Coordinator --> UC12
+Coordinator --> UC13
 @enduml

@@ -1,6 +1,6 @@
 @startuml 12_events_and_strategies
 !include _style.iuml
-title Prastav - Observer (domain events) and Strategy (review decisions, email policy, notification channels)
+title Prastav - Observer (domain events) and Strategy (review decisions, email policy)
 hide empty members
 
 package "Observer: events" {
@@ -25,15 +25,6 @@ package "Observer: events" {
   class JpaAuditRecorder
   AuditRecorder <|.. JpaAuditRecorder
   AuditEventListener --> AuditRecorder
-
-  class NotificationListener <<M2>> {
-    + on(event : ProjectStatusChangedEvent)
-  }
-  class NotificationService <<M2>> {
-    - channels : List<NotificationChannel>
-    + notify(user : User, type : NotificationType, message : String)
-  }
-  NotificationListener --> NotificationService
 }
 
 AuditEventListener ..> ProjectCreatedEvent
@@ -41,7 +32,6 @@ AuditEventListener ..> ProposalVersionCreatedEvent
 AuditEventListener ..> ProposalDraftUpdatedEvent
 AuditEventListener ..> ProjectStatusChangedEvent
 AuditEventListener ..> ReviewRecordedEvent
-NotificationListener ..> ProjectStatusChangedEvent
 
 package "Strategy: review decisions" {
   interface ReviewDecisionHandler {
@@ -85,16 +75,4 @@ ApproveDecisionHandler --> WorkflowService : approve()
 RequestRevisionDecisionHandler --> WorkflowService : requestRevision()
 RejectDecisionHandler --> WorkflowService : reject()
 ReviewService ..> ReviewRecordedEvent : publishes
-
-package "Strategy: notification channels" <<M2>> {
-  interface NotificationChannel <<M2>> {
-    + name() : String
-    + send(notification : Notification)
-  }
-  class InAppNotificationChannel <<M2>>
-  class EmailNotificationChannel <<M2>>
-  NotificationChannel <|.. InAppNotificationChannel
-  NotificationChannel <|.. EmailNotificationChannel
-}
-NotificationService o--> NotificationChannel
 @enduml

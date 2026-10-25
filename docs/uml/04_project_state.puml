@@ -10,7 +10,6 @@ UNDER_REVIEW --> APPROVED : approve\n[actor is assigned faculty]
 UNDER_REVIEW --> REVISION_REQUESTED : requestRevision\n[assigned faculty;\ncomments mandatory]
 UNDER_REVIEW --> REJECTED : reject\n[assigned faculty;\ncomments mandatory]
 REVISION_REQUESTED --> UNDER_REVIEW : submit (resubmit)\n[owner; new version vN+1 open and complete;\nreviewer already assigned]
-UNDER_REVIEW -[#9E9E9E,dashed]-> UNDER_REVIEW : <<M2>> reassignReviewer\n[COORDINATOR; new assignee FACULTY]
 APPROVED --> [*]
 REJECTED --> [*]
 
