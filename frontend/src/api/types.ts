@@ -74,7 +74,7 @@ export interface ProjectSummaryResponse {
 
 export type ProjectSort = 'LATEST' | 'OLDEST' | 'TITLE';
 
-/** Query parameters of GET /api/projects. All optional; without page the whole list is returned. */
+/** Query parameters of GET /api/projects. All optional; page defaults to 0 and size to 10 (at most 50). */
 export interface ProjectListParams {
   status?: ProjectStatus[];
   q?: string;
@@ -84,9 +84,18 @@ export interface ProjectListParams {
   size?: number;
 }
 
+/** Body of GET /api/projects: one page of rows plus paging numbers. */
+export interface ProjectPageResponse {
+  content: ProjectSummaryResponse[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+}
+
 export interface ProjectPage {
   items: ProjectSummaryResponse[];
-  /** From the X-Total-Count header: matches across all pages. */
+  /** Matches across all pages. */
   total: number;
 }
 

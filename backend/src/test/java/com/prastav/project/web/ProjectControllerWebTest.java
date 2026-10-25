@@ -6,6 +6,7 @@ import com.prastav.auth.RestAuthErrorHandler;
 import com.prastav.auth.Role;
 import com.prastav.auth.SecurityConfig;
 import com.prastav.auth.User;
+import com.prastav.project.Project;
 import com.prastav.project.ProjectCounts;
 import com.prastav.project.ProjectHistoryService;
 import com.prastav.project.ProjectListItem;
@@ -17,16 +18,21 @@ import com.prastav.workflow.IllegalTransitionException;
 import com.prastav.workflow.ProjectStatus;
 import com.prastav.workflow.WorkflowService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -34,10 +40,10 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -97,36 +103,66 @@ class ProjectControllerWebTest {
     }
 
     @Test
-    void listBindsFiltersAndReportsTotalCount() throws Exception {
+    void listBindsFiltersAndReturnsThePageEnvelope() throws Exception {
         UUID reviewerId = UUID.randomUUID();
+        User owner = new User("Aarav Mehta", "aarav.23csai@nst.rishihood.edu.in", "hash", Role.STUDENT);
+        Project project = new Project("Crop Monitoring", "Drone images", null, null, owner);
         ArgumentCaptor<ProjectListQuery> query = ArgumentCaptor.forClass(ProjectListQuery.class);
-        when(projectService.listProjects(any(Actor.class), query.capture())).thenReturn(Page.<ProjectListItem>empty());
+        when(projectService.listProjects(any(Actor.class), query.capture())).thenAnswer(invocation -> new PageImpl<>(
+                List.of(new ProjectListItem(project, null)), invocation.<ProjectListQuery>getArgument(1).pageable(), 6));
 
         mockMvc.perform(get("/api/projects")
                         .param("status", "SUBMITTED,UNDER_REVIEW")
                         .param("q", "crop")
                         .param("reviewerId", reviewerId.toString())
                         .param("sort", "OLDEST")
-                        .param("page", "0")
+                        .param("page", "1")
                         .param("size", "5")
                         .header("Authorization", bearer(Role.COORDINATOR)))
                 .andExpect(status().isOk())
-                .andExpect(header().string("X-Total-Count", "0"))
-                .andExpect(jsonPath("$").isArray());
+                .andExpect(jsonPath("$.content[0].title").value("Crop Monitoring"))
+                .andExpect(jsonPath("$.content[0].owner.name").value("Aarav Mehta"))
+                .andExpect(jsonPath("$.page").value(1))
+                .andExpect(jsonPath("$.size").value(5))
+                .andExpect(jsonPath("$.totalElements").value(6))
+                .andExpect(jsonPath("$.totalPages").value(2));
 
         ProjectListQuery bound = query.getValue();
         assertEquals(Set.of(ProjectStatus.SUBMITTED, ProjectStatus.UNDER_REVIEW), bound.statuses());
         assertEquals("crop", bound.q());
         assertEquals(reviewerId, bound.reviewerId());
         assertEquals(ProjectSort.OLDEST, bound.sort());
-        assertEquals(5, bound.pageable().getPageSize());
+        assertEquals(1, bound.page());
+        assertEquals(5, bound.size());
     }
 
     @Test
-    void unknownStatusIsA400() throws Exception {
-        mockMvc.perform(get("/api/projects").param("status", "PENDING").header("Authorization", bearer(Role.STUDENT)))
+    void listWithoutParametersAsksForTheFirstPageOfTenForTheCaller() throws Exception {
+        ArgumentCaptor<Actor> actor = ArgumentCaptor.forClass(Actor.class);
+        ArgumentCaptor<ProjectListQuery> query = ArgumentCaptor.forClass(ProjectListQuery.class);
+        when(projectService.listProjects(actor.capture(), query.capture())).thenReturn(Page.empty(PageRequest.of(0, 10)));
+
+        mockMvc.perform(get("/api/projects").header("Authorization", bearer(Role.FACULTY)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.page").value(0))
+                .andExpect(jsonPath("$.size").value(10))
+                .andExpect(jsonPath("$.totalElements").value(0))
+                .andExpect(jsonPath("$.totalPages").value(0));
+
+        assertEquals(Role.FACULTY, actor.getValue().role());
+        assertEquals(0, query.getValue().page());
+        assertEquals(10, query.getValue().size());
+        assertEquals(ProjectSort.LATEST, query.getValue().sort());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"status,PENDING", "sort,NEWEST", "page,-1", "page,first", "size,0", "size,51", "reviewerId,not-a-uuid"})
+    void invalidListParameterIsA400(String name, String value) throws Exception {
+        mockMvc.perform(get("/api/projects").param(name, value).header("Authorization", bearer(Role.STUDENT)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+        verifyNoInteractions(projectService);
     }
 
     @Test

@@ -6,7 +6,7 @@ import type {
   ProjectDetailResponse,
   ProjectListParams,
   ProjectPage,
-  ProjectSummaryResponse,
+  ProjectPageResponse,
   ProposalContent,
   ProposalVersionResponse,
   ReviewRequest,
@@ -26,8 +26,8 @@ export const listFaculty = () =>
 
 export const listProjects = ({ status, ...rest }: ProjectListParams = {}) =>
   api
-    .get<ProjectSummaryResponse[]>('/projects', { params: { ...rest, status: status?.length ? status.join(',') : undefined } })
-    .then((r): ProjectPage => ({ items: r.data, total: Number(r.headers['x-total-count'] ?? r.data.length) }));
+    .get<ProjectPageResponse>('/projects', { params: { ...rest, status: status?.length ? status.join(',') : undefined } })
+    .then((r): ProjectPage => ({ items: r.data.content, total: r.data.totalElements }));
 
 export const getProjectCounts = () => api.get<ProjectCountsResponse>('/projects/summary').then((r) => r.data);
 

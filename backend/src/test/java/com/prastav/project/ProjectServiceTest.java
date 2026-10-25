@@ -106,13 +106,14 @@ class ProjectServiceTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void listWithoutPageReturnsEverythingSortedLatestFirst() {
+    void listWithoutPagingParametersReturnsFirstPageOfTenLatestFirst() {
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         when(projectRepository.findAll(any(Specification.class), pageable.capture())).thenReturn(Page.empty());
 
-        projectService.listProjects(TestData.actor(owner), ProjectListQuery.all());
+        projectService.listProjects(TestData.actor(owner), ProjectListQuery.of(null, null, null, null, null, null));
 
-        assertEquals(false, pageable.getValue().isPaged());
+        assertEquals(0, pageable.getValue().getPageNumber());
+        assertEquals(10, pageable.getValue().getPageSize());
         assertEquals(Sort.Order.desc("updatedAt"), pageable.getValue().getSort().getOrderFor("updatedAt"));
     }
 

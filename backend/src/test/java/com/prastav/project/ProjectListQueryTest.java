@@ -1,40 +1,54 @@
 package com.prastav.project;
 
+import com.prastav.common.ValidationException;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ProjectListQueryTest {
 
     @Test
-    void blankTextAndMissingValuesFallBackToDefaults() {
-        ProjectListQuery query = new ProjectListQuery(null, "   ", null, null, null, null);
+    void missingValuesFallBackToFirstPageOfTenLatestFirst() {
+        ProjectListQuery query = ProjectListQuery.of(null, "   ", null, null, null, null);
 
         assertNull(query.q());
         assertTrue(query.statuses().isEmpty());
         assertEquals(ProjectSort.LATEST, query.sort());
-        assertTrue(query.pageable().isUnpaged());
+        assertEquals(PageRequest.of(0, ProjectListQuery.DEFAULT_SIZE, ProjectSort.LATEST.toSort()), query.pageable());
     }
 
     @Test
     void searchTextIsTrimmed() {
-        assertEquals("crop", new ProjectListQuery(null, "  crop ", null, null, null, null).q());
+        assertEquals("crop", ProjectListQuery.of(null, "  crop ", null, null, null, null).q());
     }
 
     @Test
-    void pageSizeIsClampedAndPageIsNeverNegative() {
-        Pageable tooBig = new ProjectListQuery(null, null, null, null, 0, 500).pageable();
-        Pageable tooSmall = new ProjectListQuery(null, null, null, null, -3, 0).pageable();
-        Pageable defaulted = new ProjectListQuery(null, null, null, null, 2, null).pageable();
+    void pageAndSizeArePassedThroughWithinBounds() {
+        Pageable largest = ProjectListQuery.of(null, null, null, ProjectSort.TITLE, 3, ProjectListQuery.MAX_SIZE).pageable();
+        Pageable smallest = ProjectListQuery.of(null, null, null, null, 0, 1).pageable();
 
-        assertEquals(ProjectListQuery.MAX_SIZE, tooBig.getPageSize());
-        assertEquals(1, tooSmall.getPageSize());
-        assertEquals(0, tooSmall.getPageNumber());
-        assertEquals(ProjectListQuery.DEFAULT_SIZE, defaulted.getPageSize());
-        assertEquals(2, defaulted.getPageNumber());
+        assertEquals(PageRequest.of(3, 50, ProjectSort.TITLE.toSort()), largest);
+        assertEquals(1, smallest.getPageSize());
+    }
+
+    @Test
+    void negativePageIsRejected() {
+        ValidationException error = assertThrows(ValidationException.class,
+                () -> ProjectListQuery.of(null, null, null, null, -1, null));
+        assertEquals("page must be 0 or greater", error.getMessage());
+    }
+
+    @Test
+    void sizeOutsideOneToFiftyIsRejected() {
+        assertThrows(ValidationException.class, () -> ProjectListQuery.of(null, null, null, null, 0, 0));
+        ValidationException tooBig = assertThrows(ValidationException.class,
+                () -> ProjectListQuery.of(null, null, null, null, 0, 51));
+        assertEquals("size must be between 1 and 50", tooBig.getMessage());
     }
 
     @Test
