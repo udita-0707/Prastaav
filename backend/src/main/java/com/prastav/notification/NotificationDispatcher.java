@@ -11,8 +11,10 @@ import java.util.stream.Collectors;
 
 /**
  * Sends a notification through every channel named in {@code prastav.notification.enabled-channels}, in the
- * configured order. Channels are {@link NotificationChannel} strategies; a channel that throws is logged and
- * skipped, so one failing channel never stops the others. An unknown channel name fails at startup.
+ * configured order. Channels are {@link NotificationChannel} strategies, each wrapped in a
+ * {@link RetryingNotificationChannel} configured by {@code prastav.notification.retry}. A channel that still
+ * throws after its retries is logged and skipped, so one failing channel never stops the others. An unknown
+ * channel name fails at startup.
  */
 @Component
 public class NotificationDispatcher {
@@ -24,6 +26,7 @@ public class NotificationDispatcher {
     public NotificationDispatcher(List<NotificationChannel> channels, NotificationProperties properties) {
         Map<String, NotificationChannel> byName = channels.stream()
                 .collect(Collectors.toMap(NotificationChannel::name, Function.identity()));
+        NotificationProperties.Retry retry = properties.retry();
         this.enabledChannels = properties.enabledChannels().stream()
                 .map(name -> {
                     NotificationChannel channel = byName.get(name);
@@ -32,6 +35,8 @@ public class NotificationDispatcher {
                     }
                     return channel;
                 })
+                .<NotificationChannel>map(channel ->
+                        new RetryingNotificationChannel(channel, retry.maxAttempts(), retry.delay()))
                 .toList();
     }
 

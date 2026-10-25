@@ -8,6 +8,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -42,11 +43,15 @@ class NotificationChannelTest {
     }
 
     @Test
-    void shippedConfigurationEnablesInAppAndEmail() {
+    void shippedConfigurationEnablesInAppAndEmailWithRetries() {
         new ApplicationContextRunner()
                 .withInitializer(new ConfigDataApplicationContextInitializer())
                 .withUserConfiguration(Config.class)
-                .run(context -> assertEquals(List.of(InAppNotificationChannel.NAME, EmailNotificationChannel.NAME),
-                        context.getBean(NotificationProperties.class).enabledChannels()));
+                .run(context -> {
+                    NotificationProperties properties = context.getBean(NotificationProperties.class);
+                    assertEquals(List.of(InAppNotificationChannel.NAME, EmailNotificationChannel.NAME),
+                            properties.enabledChannels());
+                    assertEquals(new NotificationProperties.Retry(3, Duration.ofMillis(200)), properties.retry());
+                });
     }
 }
