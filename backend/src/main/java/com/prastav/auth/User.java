@@ -7,7 +7,10 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 
-/** A person who can log in. The role is fixed on the account and copied into the JWT. */
+/**
+ * A person who can log in. The role is fixed on the account and copied into the JWT.
+ * Students also carry the admission year and branch parsed from their institutional email.
+ */
 @Entity
 @Table(name = "users")
 public class User extends BaseEntity {
@@ -25,6 +28,12 @@ public class User extends BaseEntity {
     @Column(nullable = false, length = 20)
     private Role role;
 
+    @Column(name = "admission_year")
+    private Integer admissionYear;
+
+    @Column(length = 20)
+    private String branch;
+
     protected User() {
     }
 
@@ -33,6 +42,14 @@ public class User extends BaseEntity {
         this.email = email;
         this.passwordHash = passwordHash;
         this.role = role;
+    }
+
+    /** A STUDENT account whose email, admission year and branch come from {@code studentEmail}. */
+    public static User student(String name, StudentEmail studentEmail, String passwordHash) {
+        User user = new User(name, studentEmail.email(), passwordHash, Role.STUDENT);
+        user.admissionYear = studentEmail.admissionYear();
+        user.branch = studentEmail.branch();
+        return user;
     }
 
     public Actor toActor() {
@@ -53,5 +70,13 @@ public class User extends BaseEntity {
 
     public Role getRole() {
         return role;
+    }
+
+    public Integer getAdmissionYear() {
+        return admissionYear;
+    }
+
+    public String getBranch() {
+        return branch;
     }
 }

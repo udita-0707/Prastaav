@@ -56,6 +56,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, event bus (Kafka e
 | FR-15 | Coordinator dashboard: counts by status, pending-assignment list, reviewer workload | M2 |
 | FR-16 | Coordinator audit-log viewer with filters | M2 |
 | FR-17 | Reassign reviewer (with audit entry) | M2 |
+| FR-18 | Institution profile and email policy: every account uses the institutional domain (`nst.rishihood.edu.in`, configured in `application.yml`); self-registration creates STUDENT accounts only and requires `<firstname>.<YY><branch>@domain`, from which admission year (2000 + YY) and branch are stored; FACULTY and COORDINATOR accounts are created by the coordinator (`POST /api/users`) or the seed; any other email or role is rejected with `VALIDATION_FAILED` | |
 
 ### 1.6 Workflow
 
@@ -143,7 +144,7 @@ com.prastaav
 
 ### 2.3 Data Model
 
-**users** — id (UUID PK), name, email (unique), password\_hash, role (STUDENT/FACULTY/COORDINATOR), created\_at
+**users** — id (UUID PK), name, email (unique), password\_hash, role (STUDENT/FACULTY/COORDINATOR), admission\_year (nullable, students), branch (nullable, students), created\_at; index (admission\_year, branch)
 
 **projects** — id, title, description, tech\_stack, team\_members (text), owner\_id (FK users), reviewer\_id (FK users, nullable), status, version (optimistic lock), created\_at, updated\_at
 
@@ -193,7 +194,7 @@ public class DraftState implements ProjectState {
 | State | `workflow` module | Replaces status if/else chains; legal transitions per state |
 | Observer (Spring events) | `ProjectStatusChangedEvent`, `ReviewRecordedEvent` → `AuditEventListener`, `NotificationListener` | Audit and notifications decoupled from workflow |
 | Factory | `ProjectStateFactory`, `ProposalVersionFactory` (new version from previous) | Centralized object creation |
-| Strategy | `ReviewDecisionHandler` per decision (Approve/Revise/Reject); `NotificationChannel` (InApp now, Email later) | Add behaviour without modifying services |
+| Strategy | `ReviewDecisionHandler` per decision (Approve/Revise/Reject); `EmailPolicy` / `PatternEmailPolicy` for account emails; `NotificationChannel` (InApp now, Email later) | Add behaviour without modifying services |
 | Facade | `WorkflowService` | One simple API over state, repository, events |
 | Repository | Spring Data JPA | Persistence abstraction |
 | Builder | `AuditLog.builder()`, DTO builders | Readable construction of multi-field objects |
@@ -213,10 +214,11 @@ Base path `/api`. All except auth require `Authorization: Bearer <jwt>`.
 
 | Method | Path | Role | Purpose | M |
 | --- | --- | --- | --- | --- |
-| POST | /auth/register | public | Register (role restricted: coordinator seeded/created by coordinator) | 1 |
+| POST | /auth/register | public | Register a STUDENT with an institutional student email (FR-18) | 1 |
 | POST | /auth/login | public | Returns JWT + user | 1 |
 | GET | /auth/me | any | Current user | 1 |
 | GET | /users?role=FACULTY | COORDINATOR | List faculty for assignment | 1 |
+| POST | /users | COORDINATOR | Create a FACULTY or COORDINATOR account on the institutional domain (FR-18) | |
 | POST | /projects | STUDENT | Create project + draft v1 | 1 |
 | GET | /projects?status=&q=&reviewerId=&sort=&page=&size= | any | Role-scoped list with status filter, search, sort and paging; `X-Total-Count` header | 1 |
 | GET | /projects/{id} | owner/reviewer/coordinator | Project detail + current status | 1 |
@@ -242,7 +244,8 @@ Error format: `{ timestamp, status, code, message, path, fieldErrors[] }`. Codes
 - Spring Security stateless, JWT (HS256, 1h expiry), claims: userId, role.
 - `@PreAuthorize` for role gates; service-level ownership checks (owner / assigned reviewer) via a `ProjectAccessPolicy` class.
 - Passwords BCrypt; no stack traces in responses; CORS limited to frontend origin.
-- Seed script creates one coordinator, two faculty, three students for demo.
+- Seed creates one coordinator, two faculty and three students on the institutional domain, sharing `prastav.seed.demo-password`.
+- `EmailPolicy` (Strategy) checks the institutional domain for every new account and parses admission year and branch from student emails (FR-18).
 
 ### 2.8 Frontend (React + TypeScript)
 

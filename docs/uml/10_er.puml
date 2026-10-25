@@ -1,6 +1,6 @@
 @startuml 10_er
 !include _style.iuml
-title Prastav - ER diagram (Flyway V1__init.sql; notifications is <<M2>>)
+title Prastav - ER diagram (Flyway V1 to V3; notifications is <<M2>>)
 hide circle
 skinparam linetype ortho
 
@@ -11,7 +11,11 @@ entity users {
   * email : VARCHAR(255) <<UNIQUE>>
   * password_hash : VARCHAR(100)
   * role : VARCHAR(20) <<CHECK>>
+  admission_year : INTEGER
+  branch : VARCHAR(20)
   * created_at : TIMESTAMPTZ
+  --
+  idx (admission_year, branch)
 }
 
 entity projects {

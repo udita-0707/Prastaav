@@ -5,6 +5,7 @@
 ## Features by role
 
 **Student**
+- Register with your institutional student email (`<firstname>.<YY><branch>@nst.rishihood.edu.in`); your admission year and branch are read from it.
 - Create a project and write the proposal in a four-step wizard (basic info; problem and objectives; methodology and outcomes; timeline and review), saving drafts at any step.
 - Submit the proposal; the submitted version is frozen.
 - Follow the status on the home dashboard (totals, drafts, in review, approved) and get an alert when a reviewer requests changes.
@@ -20,6 +21,7 @@
 - See every project with counts by status, search, status and faculty filters, sorting and paging.
 - Assign a faculty reviewer to submitted projects from the "Assign Faculty" page, from any list row or from the project page.
 - Follow every review in progress from the "Reviews" list.
+- Create faculty and coordinator accounts on the institutional domain through `POST /api/users`.
 
 ## Screens
 
@@ -27,7 +29,7 @@
 | --- | --- | --- |
 | Landing page | `/` | everyone (signed-in users go to `/app`) |
 | Sign in, with demo-account buttons | `/login` | everyone |
-| Create an account | `/register` | students and faculty |
+| Create an account | `/register` | students |
 | Home dashboard | `/app` | each role has its own |
 | Project list (My / Assigned / All Projects) | `/app/projects` | all roles, scoped by role |
 | Create project wizard | `/app/projects/new` | student |
@@ -68,13 +70,16 @@ Open http://localhost:5173. Swagger UI is at http://localhost:8080/swagger-ui.ht
 
 ### Demo accounts
 
-All seeded accounts use the password **Password@123**. The sign-in page has "Try demo accounts" buttons that fill these in.
+All seeded accounts are fictional people and share one password, `prastav.seed.demo-password` (default **Password@123**). The sign-in page has "Try demo accounts" buttons that fill these in.
 
-| Role | Email |
-| --- | --- |
-| Coordinator | coordinator@prastav.edu |
-| Faculty | anita.rao@prastav.edu, vikram.shah@prastav.edu |
-| Student | aarav@prastav.edu, diya@prastav.edu, rohan@prastav.edu |
+| Role | Name | Email | Admission year, branch |
+| --- | --- | --- | --- |
+| Coordinator | Meera Nair | coordinator@nst.rishihood.edu.in | |
+| Faculty | Dr. Anita Rao | anita.rao@nst.rishihood.edu.in | |
+| Faculty | Dr. Vikram Shah | vikram.shah@nst.rishihood.edu.in | |
+| Student | Aarav Mehta | aarav.23csai@nst.rishihood.edu.in | 2023, CSAI |
+| Student | Diya Kapoor | diya.23csai@nst.rishihood.edu.in | 2023, CSAI |
+| Student | Rohan Iyer | rohan.24csai@nst.rishihood.edu.in | 2024, CSAI |
 
 ## Configuration
 
@@ -87,14 +92,30 @@ All seeded accounts use the password **Password@123**. The sign-in page has "Try
 | `JWT_SECRET` | development-only value | HS256 key, at least 32 bytes; set your own outside a demo |
 | `CORS_ORIGIN` | `http://localhost:5173` | allowed browser origin |
 | `SEED_DEMO_DATA` | `true` | create the demo users on an empty database |
+| `DEMO_PASSWORD` | `Password@123` | shared password of every demo account |
 
-### Frontend and institution
+### Institution
+
+The institution profile lives under `prastav.institution` in `backend/src/main/resources/application.yml` and is bound to `InstitutionProperties`. `PatternEmailPolicy` applies it to every new account.
+
+| Property (variable) | Default | Purpose |
+| --- | --- | --- |
+| `name` (`INSTITUTION_NAME`) | `Newton School of Technology, Rishihood University` | institution name used in validation messages |
+| `email-domain` (`INSTITUTION_EMAIL_DOMAIN`) | `nst.rishihood.edu.in` | the only email domain accepted for any account |
+| `student-email-pattern` | `[a-z]+\.(?<year>\d{2})(?<branch>[a-z]+)` | local part of a student email; the `year` group gives admission year 2000 + YY, the `branch` group gives the branch in upper case |
+
+Rules:
+- `POST /api/auth/register` creates **students only**. The email must be on the institutional domain and match the student pattern, e.g. `aarav.23csai@nst.rishihood.edu.in` is admission year 2023, branch CSAI. Emails are matched case-insensitively and stored in lower case. Any other email, or a request for another role, is rejected with `400 VALIDATION_FAILED`.
+- Faculty and coordinator accounts are created by the coordinator through `POST /api/users` (domain check only) or by the seed.
+
+### Frontend
 
 Copy `frontend/.env.example` to `frontend/.env` to change these.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VITE_INSTITUTION_NAME` | `Your University` | institution name in the landing page footer |
+| `VITE_INSTITUTION_EMAIL_DOMAIN` | `nst.rishihood.edu.in` | domain in the register form hint and the demo accounts; keep it equal to the backend `email-domain` |
 | `VITE_SHOW_DEMO_ACCOUNTS` | `true` | show the demo-account buttons on the sign-in page; set `false` when the backend runs without seed data |
 | `VITE_API_BASE_URL` | `/api` | API base URL; the default goes through the Vite dev proxy to port 8080 |
 
@@ -106,8 +127,9 @@ Base path `/api`; every endpoint except register, login and Swagger needs `Autho
 
 | Method | Path | Role | Purpose |
 | --- | --- | --- | --- |
-| POST | `/auth/register`, `/auth/login` | public | Register a student or faculty account; sign in |
+| POST | `/auth/register`, `/auth/login` | public | Register a student account with an institutional student email; sign in |
 | GET | `/users?role=FACULTY` | coordinator | Faculty list for assignment |
+| POST | `/users` | coordinator | Create a FACULTY or COORDINATOR account on the institutional domain |
 | POST | `/projects` | student | Create a project with draft v1 |
 | GET | `/projects` | any | Role-scoped list; optional `status` (one or more), `q`, `reviewerId`, `sort` (`LATEST`, `OLDEST`, `TITLE`), `page`, `size`; the `X-Total-Count` header carries the number of matches |
 | GET | `/projects/summary` | any | Counts by status for the caller's projects, plus projects awaiting assignment for the coordinator |
@@ -124,7 +146,7 @@ Base path `/api`; every endpoint except register, login and Swagger needs `Autho
 ```
 backend/src/main/java/com/prastav/
   common/     error model, exceptions, BaseEntity, Swagger config
-  auth/       users, JWT, security, seed data             (+ web/)
+  auth/       users, institution email policy, JWT, security, seed data (+ web/)
   workflow/   State pattern engine: ProjectState, six states, factory, WorkflowService
   project/    Project aggregate, access policy, list query and specifications, counts, history (+ web/)
   proposal/   immutable versions, factory, draft editing  (+ web/)
@@ -165,7 +187,7 @@ cd frontend && npm run typecheck           # TypeScript type check
 cd frontend && npm run build               # type check and production build
 ```
 
-Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery` and the audit listener. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters and the summary endpoint.
+Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery`, the audit listener, `PatternEmailPolicy` (with the shipped configuration), registration in `AuthService` and account creation in `UserService`. `UserControllerWebTest` checks the coordinator-only `POST /api/users`. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters and the summary endpoint.
 
 ## Design patterns
 
@@ -175,7 +197,7 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 | Factory | `ProjectStateFactory`, `ProposalVersionFactory` |
 | Facade | `WorkflowService` |
 | Observer | domain events consumed by `AuditEventListener` |
-| Strategy | `ReviewDecisionHandler` and its three decision handlers |
+| Strategy | `ReviewDecisionHandler` and its three decision handlers; `EmailPolicy` with `PatternEmailPolicy` for account emails |
 | Specification | `ProjectSpecifications` for the filtered project list |
 | Repository | Spring Data repositories per module |
 | Builder | `AuditLog.Builder` |
@@ -183,9 +205,9 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 
 ## Five-minute demo
 
-1. Sign in as **aarav@prastav.edu**, create a project in the wizard, fill every step, then **Submit proposal**.
-2. Sign in as **coordinator@prastav.edu**, open **Assign Faculty**, choose **Dr. Anita Rao** for the project.
-3. Sign in as **anita.rao@prastav.edu**, open the project from **Awaiting your review**, choose **Request changes**, write a comment and **Record decision**.
+1. Sign in as **aarav.23csai@nst.rishihood.edu.in**, create a project in the wizard, fill every step, then **Submit proposal**.
+2. Sign in as **coordinator@nst.rishihood.edu.in**, open **Assign Faculty**, choose **Dr. Anita Rao** for the project.
+3. Sign in as **anita.rao@nst.rishihood.edu.in**, open the project from **Awaiting your review**, choose **Request changes**, write a comment and **Record decision**.
 4. As the student: read the feedback, **Start version 2**, edit it with the feedback panel open, then **Resubmit v2**. The Versions tab shows v1 unchanged.
 5. As the faculty member: **Approve**.
 6. In Swagger: `GET /api/projects/{id}/history` shows every step; `POST /api/projects/{id}/reviews` with `{"decision":"APPROVE"}` on a project that is only SUBMITTED returns **409 ILLEGAL_TRANSITION**.
@@ -196,4 +218,5 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 - **Port 5432 already in use**: stop the local PostgreSQL or change the left side of the port mapping and `DB_URL`.
 - **"Flyway validate failed" after editing a migration**: never edit an applied migration; add a new `V<n>__...sql`, or for a throwaway demo database run `docker compose down -v`.
 - **The web app says the server is not reachable**: the backend is not on port 8080; Vite proxies `/api` there.
+- **Demo sign-in fails with "Invalid email or password"**: the seed only runs on an empty database, so a database that already had other users has no demo accounts; for a throwaway demo database run `docker compose down -v` and start the backend again.
 - **Signed out after an hour**: the JWT expired; sign in again.

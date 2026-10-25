@@ -29,8 +29,15 @@ prastav:
     expiration-minutes: 60
   cors:
     allowed-origin: ${CORS_ORIGIN:http://localhost:5173}
+  institution:
+    name: ${INSTITUTION_NAME:Newton School of Technology, Rishihood University}
+    email-domain: ${INSTITUTION_EMAIL_DOMAIN:nst.rishihood.edu.in}
+    # Local part of a student email: <firstname>.<YY><branch>, e.g. aarav.23csai (admission year 2023, branch CSAI).
+    student-email-pattern: '[a-z]+\.(?<year>\d{2})(?<branch>[a-z]+)'
   seed:
     enabled: ${SEED_DEMO_DATA:true}
+    # Shared password of every demo account. Development default only.
+    demo-password: ${DEMO_PASSWORD:Password@123}
 
 springdoc:
   swagger-ui:

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { errorMessage } from '../api/client';
 import type { Role } from '../api/types';
+import { ROLE_LABEL } from '../components/labels';
 import { useAuth } from '../auth/AuthContext';
 import { ErrorNote } from '../components/ErrorNote';
 import { Button, ButtonLink, Card, Input } from '../components/ui';
@@ -112,12 +113,12 @@ export function LoginPage() {
               Try demo accounts
             </h3>
             <p className="mt-1 text-xs text-muted">Fills in the form; then press Sign in.</p>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {DEMO_ACCOUNTS.map(({ role, label, email: demoEmail }) => {
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {DEMO_ACCOUNTS.map(({ role, name, email: demoEmail }) => {
                 const Icon = DEMO_ICON[role];
                 return (
                   <button
-                    key={role}
+                    key={demoEmail}
                     type="button"
                     onClick={() => {
                       setEmail(demoEmail);
@@ -125,12 +126,15 @@ export function LoginPage() {
                       setError(null);
                     }}
                     className="flex items-center gap-3 rounded-field border border-line bg-white px-3 py-2.5 text-left text-sm font-medium text-ink transition-colors hover:border-brand-300 hover:bg-brand-50"
-                    aria-label={`Fill in the ${label.toLowerCase()} demo account`}
+                    aria-label={`Fill in the demo account of ${name}, ${ROLE_LABEL[role].toLowerCase()}`}
                   >
-                    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-50 text-accent-600">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-50 text-accent-600">
                       <Icon className="h-4 w-4" aria-hidden />
                     </span>
-                    {label}
+                    <span className="min-w-0">
+                      <span className="block truncate">{name}</span>
+                      <span className="block text-xs font-normal text-muted">{ROLE_LABEL[role]}</span>
+                    </span>
                   </button>
                 );
               })}
