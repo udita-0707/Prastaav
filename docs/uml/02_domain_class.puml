@@ -146,16 +146,17 @@ enum AuditAction {
   STATUS_CHANGED
 }
 
-class Notification <<M2>> {
-  - user : User
-  - projectId : UUID
+class Notification {
+  - recipient : User
+  - project : Project
   - type : NotificationType
   - message : String
   - read : boolean
   + markRead()
+  + isAddressedTo(userId : UUID) : boolean
 }
 
-enum NotificationType <<M2>> {
+enum NotificationType {
   REVIEWER_ASSIGNED
   REVIEW_DECISION
   RESUBMITTED
@@ -184,6 +185,7 @@ Review --> ReviewDecision
 Review "*" --> "1" User : reviewer
 AuditLog --> AuditAction
 AuditLog ..> Project : projectId
-Notification ..> User
+Notification "*" --> "1" User : recipient
+Notification "*" --> "0..1" Project : project
 Notification --> NotificationType
 @enduml

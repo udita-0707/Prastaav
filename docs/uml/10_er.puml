@@ -1,6 +1,6 @@
 @startuml 10_er
 !include _style.iuml
-title Prastav - ER diagram (Flyway V1 to V3; notifications is <<M2>>)
+title Prastav - ER diagram (Flyway migrations)
 hide circle
 skinparam linetype ortho
 
@@ -81,15 +81,18 @@ entity audit_logs {
   trigger: append-only
 }
 
-entity notifications <<M2>> {
+entity notifications {
   * id : UUID <<PK>>
   --
-  * user_id : UUID <<FK users>>
+  * recipient_id : UUID <<FK users>>
   project_id : UUID <<FK projects>>
-  * type : VARCHAR(30)
-  * message : TEXT
+  * type : VARCHAR(30) <<CHECK>>
+  * message : VARCHAR(500)
   * is_read : BOOLEAN
   * created_at : TIMESTAMPTZ
+  --
+  idx (recipient_id, is_read)
+  idx (recipient_id, created_at)
 }
 
 users ||--o{ projects : owns
@@ -100,5 +103,6 @@ projects ||--o{ reviews : has
 users ||--o{ reviews : writes
 projects |o--o{ audit_logs : logged in
 users ||--o{ audit_logs : acts in
-users ||..o{ notifications : <<M2>>
+users ||--o{ notifications : receives
+projects |o--o{ notifications : about
 @enduml

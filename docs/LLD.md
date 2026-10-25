@@ -67,7 +67,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-10 | Audit log for every state change, assignment, submission, review | M1 | [M1 Implemented] | `AuditEventListener`, `AuditLog`, append-only trigger |
 | FR-11 | Project timeline | M1 API / M2 UI | API [M1 Implemented]; UI tab [M2 Planned] | `ProjectHistoryService`, `GET /api/projects/{id}/history` |
 | FR-12 | Role-scoped lists with status filter, search, pagination | — | Implemented | `ProjectService.listProjects`, `ProjectListQuery`, `ProjectSpecifications`, `GET /api/projects?status=&q=&reviewerId=&sort=&page=&size=` |
-| FR-13 | In-app notifications | M2 | [M2 Planned] | `NotificationListener`, `NotificationService`, `NotificationChannel` |
+| FR-13 | In-app notifications | — | Notification core implemented: entity, `notifications` table, inbox queries with ownership checks; event listeners and HTTP endpoints not built | `Notification`, `NotificationRepository`, `NotificationService`, `NotificationMapper`, `V4__notifications.sql` |
 | FR-14 | Compare two versions (field diff) | M2 | [M2 Planned] | `VersionCompareService`, `VersionComparison`, `FieldDiff` |
 | FR-15 | Coordinator dashboard | — | Implemented as role dashboards: counts per status and projects awaiting assignment | `ProjectService.countProjects`, `GET /api/projects/summary`, web app home pages |
 | FR-16 | Audit-log viewer with filters | M2 | [M2 Planned] | `AuditController`, `AuditLogFilter`, `AuditLogResponse` |
@@ -78,12 +78,12 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 
 | Item | Status | Evidence |
 |---|---|---|
-| Flyway schema with constraints and triggers | Implemented | `backend/src/main/resources/db/migration/V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql` |
+| Flyway schema with constraints and triggers | Implemented | `backend/src/main/resources/db/migration/V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql` |
 | Seed data (1 coordinator, 2 faculty, 3 students on `nst.rishihood.edu.in`, one shared `prastav.seed.demo-password`) | Implemented | `DemoDataSeeder` |
 | Optimistic locking on `Project` | [M1 Implemented] | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | [M1 Implemented] | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | [M1 Implemented] | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation | Implemented | 103 tests in `backend/src/test/java` (see section 16) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service | Implemented | 114 tests in `backend/src/test/java` (see section 16) |
 | MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | Implemented | `ProjectControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests) |
 | React UI for three roles | [M1 Implemented] | `frontend/src` |
 | PostgreSQL via docker-compose | [M1 Implemented] | `docker-compose.yml` (database only) |
@@ -166,9 +166,8 @@ com.prastav
 ├─ audit       AuditLog, AuditAction, AuditLogRepository, AuditRecorder, JpaAuditRecorder,
 │              AuditEventListener, AuditQueryService                                          [M1]
 │              AuditController, AuditLogFilter, AuditLogResponse                              [M2]
-├─ notification Notification, NotificationType, NotificationRepository, NotificationChannel,
-│              InAppNotificationChannel, EmailNotificationChannel, NotificationService,
-│              NotificationListener, NotificationController, NotificationResponse             [M2]
+├─ notification Notification, NotificationType, NotificationRepository, NotificationService
+│  └─ web      NotificationResponse, NotificationMapper
 └─ dashboard   DashboardService, DashboardController, DashboardSummary, ReviewerWorkload      [M2]
 ```
 
@@ -1786,6 +1785,94 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 - `public JpaAuditRecorder(AuditLogRepository auditLogRepository)`
 - `public void record(AuditLog entry)`
 
+### 8.12a Package `com.prastav.notification`
+
+#### `Notification`
+
+*class* `extends BaseEntity` · @Entity · `src/main/java/com/prastav/notification/Notification.java`
+
+**Responsibility.** An in-app message for one user, optionally about a project. Only the read flag changes after creation, and only through markRead().
+
+| Field | Type | Visibility |
+|---|---|---|
+| `recipient` | `User` (`@ManyToOne`, not null, column `recipient_id`) | private |
+| `project` | `Project` (`@ManyToOne`, nullable, column `project_id`) | private |
+| `type` | `NotificationType` | private |
+| `message` | `String` (max 500) | private |
+| `read` | `boolean` (column `is_read`) | private |
+
+**Methods:**
+
+- `protected Notification()`
+- `public Notification(User recipient, Project project, NotificationType type, String message)`: recipient, type and message are required
+- `public void markRead()`
+- `public boolean isAddressedTo(UUID userId)`
+- `public User getRecipient()`
+- `public Project getProject()`
+- `public NotificationType getType()`
+- `public String getMessage()`
+- `public boolean isRead()`
+
+#### `NotificationRepository`
+
+*interface* `extends JpaRepository<Notification, UUID>` · `src/main/java/com/prastav/notification/NotificationRepository.java`
+
+**Responsibility.** Repository pattern: persistence for Notification. Every query is scoped to one recipient.
+
+**Methods:**
+
+- `Page<Notification> findByRecipientIdOrderByCreatedAtDesc(UUID recipientId, Pageable pageable)`
+- `Page<Notification> findByRecipientIdAndReadFalseOrderByCreatedAtDesc(UUID recipientId, Pageable pageable)`
+- `long countByRecipientIdAndReadFalse(UUID recipientId)`
+- `int markAllReadFor(UUID recipientId)`: `@Modifying` JPQL update of the recipient's unread rows
+
+#### `NotificationService`
+
+*class* · @Service · `src/main/java/com/prastav/notification/NotificationService.java`
+
+**Responsibility.** Creates notifications and serves a user's own inbox. Reads and updates are always scoped to the calling actor: a user can only list, count and mark their own notifications.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `notificationRepository` | `NotificationRepository` | private |
+
+**Methods:**
+
+- `public NotificationService(NotificationRepository notificationRepository)`
+- `public Notification create(User recipient, Project project, NotificationType type, String message)`: stores an unread notification; `project` may be null
+- `public Page<Notification> listFor(Actor actor, boolean unreadOnly, Pageable pageable)`: newest first
+- `public long unreadCount(Actor actor)`
+- `public Notification markRead(UUID notificationId, Actor actor)`: 404 NOT_FOUND for an unknown id, 403 FORBIDDEN for another user's notification
+- `public int markAllRead(Actor actor)`: returns the number of notifications changed
+
+#### `NotificationType`
+
+*enum* · `src/main/java/com/prastav/notification/NotificationType.java`
+
+**Responsibility.** What a notification is about. Stored as a string in notifications.type.
+
+**Constants:** `REVIEWER_ASSIGNED`, `REVIEW_DECISION`, `RESUBMITTED`
+
+### 8.12b Package `com.prastav.notification.web`
+
+#### `NotificationMapper`
+
+*final class* · `src/main/java/com/prastav/notification/web/NotificationMapper.java`
+
+**Responsibility.** DTO mapper for notifications.
+
+**Methods:**
+
+- `public static NotificationResponse toResponse(Notification notification)`
+
+#### `NotificationResponse`
+
+*record* · `src/main/java/com/prastav/notification/web/NotificationResponse.java`
+
+**Responsibility.** One notification in the caller's inbox. projectId and projectTitle are null when it has no project.
+
+**Components:** `UUID id, NotificationType type, String message, UUID projectId, String projectTitle, boolean read, Instant createdAt`
+
 ### 8.13 [M2 Planned] classes and members
 
 None of the following exists in the M1 code.
@@ -1809,16 +1896,12 @@ None of the following exists in the M1 code.
 
 | Package | Class | Kind | Fields / methods | Responsibility |
 |---|---|---|---|---|
-| notification | `Notification` | entity, extends `BaseEntity` | `User user`, `UUID projectId`, `NotificationType type`, `String message`, `boolean read`; `markRead()` | one in-app message |
-| notification | `NotificationType` | enum | REVIEWER_ASSIGNED, REVIEW_DECISION, RESUBMITTED | what happened |
-| notification | `NotificationRepository` | interface | `findByUser_IdOrderByCreatedAtDesc(UUID userId, Pageable p)`, `countByUser_IdAndReadFalse(UUID userId)` | persistence |
 | notification | `NotificationChannel` | interface (Strategy) | `String name()`, `void send(Notification notification)` | delivery mechanism |
 | notification | `InAppNotificationChannel` | `@Component` | `NotificationRepository repository`; `send` saves the row | in-app delivery |
 | notification | `EmailNotificationChannel` | `@Component` | `send` logs only | placeholder for email |
-| notification | `NotificationService` | `@Service` | `List<NotificationChannel> channels`; `notify(User user, NotificationType type, String message)`, `listMine(Actor actor)`, `markRead(UUID id, Actor actor)` | fan-out to channels, ownership check on read |
+| notification | `NotificationService` (section 8.12a) | new member | `List<NotificationChannel> channels`, sending through each channel | fan-out to channels |
 | notification | `NotificationListener` | `@Component` (Observer) | `@TransactionalEventListener on(ProjectStatusChangedEvent event)` | decides who to notify |
 | notification.web | `NotificationController` | `@RestController` | `GET /api/notifications`, `PATCH /api/notifications/{id}/read` | HTTP |
-| notification.web | `NotificationResponse` | record | `UUID id, UUID projectId, NotificationType type, String message, boolean read, Instant createdAt` | DTO |
 | proposal | `VersionCompareService` | `@Service` | `VersionComparison compare(UUID projectId, int from, int to, Actor actor)` | field-level diff of two versions |
 | proposal | `VersionComparison` | record | `int fromVersion, int toVersion, List<FieldDiff> fields` | result |
 | proposal | `FieldDiff` | record | `String field, String fromValue, String toValue, boolean changed` | one field |
@@ -1835,7 +1918,7 @@ None of the following exists in the M1 code.
 
 ## 9. Database schema
 
-Owned by Flyway (`V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`); Hibernate runs with `ddl-auto: none`. All ids are application-generated UUIDs; all timestamps are `TIMESTAMPTZ` stored in UTC.
+Owned by Flyway (`V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`); Hibernate runs with `ddl-auto: none`. All ids are application-generated UUIDs; all timestamps are `TIMESTAMPTZ` stored in UTC.
 
 ![ER diagram](uml/png/10_er.png)
 
@@ -1911,9 +1994,21 @@ Extra integrity: partial unique index `ux_proposal_one_open_draft` on (project_i
 
 Trigger `trg_audit_logs_append_only` rejects UPDATE and DELETE.
 
-### 9.6 `notifications` [M2 Planned]
+### 9.6 `notifications`
 
-Migration `V2__notifications.sql`: id UUID PK; user_id UUID NOT NULL FK users; project_id UUID FK projects; type VARCHAR(30) NOT NULL; message TEXT NOT NULL; is_read BOOLEAN NOT NULL DEFAULT false; created_at TIMESTAMPTZ NOT NULL; index (user_id, is_read, created_at). M2 also adds `V3__search_indexes.sql` with a `lower(title)` index for search.
+Created by `V4__notifications.sql`.
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| recipient_id | UUID | NOT NULL, FK users |
+| project_id | UUID | FK projects, nullable |
+| type | VARCHAR(30) | NOT NULL, CHECK in (REVIEWER_ASSIGNED, REVIEW_DECISION, RESUBMITTED) |
+| message | VARCHAR(500) | NOT NULL |
+| is_read | BOOLEAN | NOT NULL, DEFAULT false |
+| created_at | TIMESTAMPTZ | NOT NULL |
+
+Indexes: `idx_notifications_recipient_read` (recipient_id, is_read) for the unread count and unread filter; `idx_notifications_recipient_created` (recipient_id, created_at) for the newest-first inbox.
 
 ## 10. REST API contracts
 
@@ -2270,6 +2365,7 @@ The project list is not paginated (M2). The timeline is API-only (UI tab is M2).
 | `AuthServiceTest` | student registration stores admission year and branch; omitted role means STUDENT; FACULTY and COORDINATOR, faculty-style email, other domain and duplicate email rejected |
 | `UserServiceTest` | coordinator creates FACULTY and COORDINATOR without the student pattern; other callers 403; STUDENT, other domain and duplicate email rejected |
 | `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400 |
+| `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project |
 | `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding and `X-Total-Count`; unknown status 400; summary body |
 
 All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed.

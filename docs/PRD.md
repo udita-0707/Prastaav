@@ -138,7 +138,7 @@ com.prastaav
  ├─ review      (Review, ReviewDecision, ReviewService, ReviewController)
  ├─ workflow    (ProjectStatus, ProjectState + 6 state classes, ProjectStateFactory, WorkflowService)
  ├─ audit       (AuditLog, AuditEventListener, AuditController)
- ├─ notification (M2: Notification, NotificationListener, NotificationController)
+ ├─ notification (Notification, NotificationType, NotificationRepository, NotificationService; web: NotificationResponse, NotificationMapper)
  └─ common      (ApiError, GlobalExceptionHandler, exceptions, base entity)
 ```
 
@@ -154,9 +154,9 @@ com.prastaav
 
 **audit\_logs** — id, project\_id (nullable FK), actor\_id, action (PROJECT\_CREATED, PROPOSAL\_SUBMITTED, REVIEWER\_ASSIGNED, REVIEW\_RECORDED, STATUS\_CHANGED, …), from\_status, to\_status, details (JSON text), created\_at — append-only
 
-**notifications** (M2) — id, user\_id, project\_id, type, message, is\_read, created\_at
+**notifications** — id, recipient\_id (FK users), project\_id (nullable FK projects), type (REVIEWER\_ASSIGNED/REVIEW\_DECISION/RESUBMITTED), message, is\_read, created\_at; indexes (recipient\_id, is\_read) and (recipient\_id, created\_at)
 
-Relationships: User 1—\* Project (owner); User 1—\* Project (reviewer); Project 1—\* ProposalVersion; ProposalVersion 1—\* Review; Project 1—\* AuditLog.
+Relationships: User 1—\* Project (owner); User 1—\* Project (reviewer); Project 1—\* ProposalVersion; ProposalVersion 1—\* Review; Project 1—\* AuditLog; User 1—\* Notification (recipient); Project 0..1—\* Notification.
 
 Use Flyway migrations (`V1__init.sql`, …) so schema is reproducible.
 
