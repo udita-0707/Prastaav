@@ -50,7 +50,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, event bus (Kafka e
 | FR-9 | Invalid transitions rejected with clear error (e.g. approve a DRAFT) | M1 |
 | FR-10 | Every state change, assignment, submission and review recorded in audit log (who, what, when, before/after) | M1 |
 | FR-11 | Project timeline view (all versions, reviews, status changes in order) | M1 (API) / M2 (UI) |
-| FR-12 | Role-scoped project lists with status filter, search and pagination | M2 |
+| FR-12 | Role-scoped project lists with status filter, case-insensitive search and pagination (page from 0, size 1 to 50, default 10); filtering and paging run in the database; invalid parameters are rejected with `VALIDATION_FAILED` | M2 |
 | FR-13 | In-app notifications on assignment, review decision, resubmission | M2 |
 | FR-14 | Compare two proposal versions (field-level diff) | M2 |
 | FR-15 | Coordinator dashboard: counts by status, pending-assignment list, reviewer workload | M2 |
@@ -220,7 +220,7 @@ Base path `/api`. All except auth require `Authorization: Bearer <jwt>`.
 | GET | /users?role=FACULTY | COORDINATOR | List faculty for assignment | 1 |
 | POST | /users | COORDINATOR | Create a FACULTY or COORDINATOR account on the institutional domain (FR-18) | |
 | POST | /projects | STUDENT | Create project + draft v1 | 1 |
-| GET | /projects?status=&q=&reviewerId=&sort=&page=&size= | any | Role-scoped list with status filter, search, sort and paging; `X-Total-Count` header | 1 |
+| GET | /projects?status=&q=&reviewerId=&sort=&page=&size= | any | Role-scoped list with status filter, search, sort and paging; returns `{ content, page, size, totalElements, totalPages }` | 1 |
 | GET | /projects/{id} | owner/reviewer/coordinator | Project detail + current status | 1 |
 | PUT | /projects/{id}/proposal | STUDENT (owner) | Edit current draft version | 1 |
 | POST | /projects/{id}/proposals | STUDENT (owner) | Create next version draft (only in REVISION\_REQUESTED) | 1 |

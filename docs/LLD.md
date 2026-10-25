@@ -83,8 +83,8 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | Optimistic locking on `Project` | [M1 Implemented] | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | [M1 Implemented] | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | [M1 Implemented] | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service | Implemented | 114 tests in `backend/src/test/java` (see section 16) |
-| MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | Implemented | `ProjectControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service | Implemented | 128 tests in `backend/src/test/java` (see section 16) |
+| MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | Implemented | `ProjectControllerWebTest` (13 tests), `UserControllerWebTest` (4 tests) |
 | React UI for three roles | [M1 Implemented] | `frontend/src` |
 | PostgreSQL via docker-compose | [M1 Implemented] | `docker-compose.yml` (database only) |
 | Backend/frontend Dockerfiles, compose for whole stack | [M2 Planned] | section 15.3 |
@@ -1102,13 +1102,14 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 *record* · `src/main/java/com/prastav/project/ProjectListQuery.java`
 
-**Responsibility.** Filters, ordering and paging for the role-scoped project list. Every field is optional. Without page the whole filtered list is returned; a page size is clamped to 1..100 (default 10).
+**Responsibility.** Filters, ordering and paging for the role-scoped project list. Filters are optional; the list is always paged. A negative page or a size outside 1..50 is rejected with VALIDATION_FAILED instead of being silently corrected.
 
-**Components:** `Set<ProjectStatus> statuses, String q, UUID reviewerId, ProjectSort sort, Integer page, Integer size`
+**Components:** `Set<ProjectStatus> statuses, String q, UUID reviewerId, ProjectSort sort, int page, int size`
 
 **Methods:**
 
-- `public static ProjectListQuery all()`
+- `public ProjectListQuery(...)`: canonical constructor; null statuses become empty, blank `q` becomes null, null sort becomes LATEST; throws `ValidationException` for `page < 0` or `size` outside 1..50
+- `public static ProjectListQuery of(Set<ProjectStatus> statuses, String q, UUID reviewerId, ProjectSort sort, Integer page, Integer size)`: page 0 and size 10 when not given
 - `public Pageable pageable()`
 
 #### `ProjectRepository` [M1 Implemented]
@@ -1265,7 +1266,7 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 - `public ProjectController(ProjectService projectService, WorkflowService workflowService, ProjectHistoryService projectHistoryService)`
 - `public ProjectDetailResponse create(CreateProjectRequest request, Actor actor)`
-- `public ResponseEntity<List<ProjectSummaryResponse>> list(List<ProjectStatus> status, String q, UUID reviewerId, ProjectSort sort, Integer page, Integer size, Actor actor)`: sets the `X-Total-Count` header
+- `public ProjectPageResponse list(List<ProjectStatus> status, String q, UUID reviewerId, ProjectSort sort, Integer page, Integer size, Actor actor)`
 - `public ProjectCountsResponse summary(Actor actor)`
 - `public ProjectDetailResponse get(UUID id, Actor actor)`
 - `public ProjectDetailResponse submit(UUID id, Actor actor)`
@@ -1297,8 +1298,17 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 **Methods:**
 
 - `public static ProjectSummaryResponse toSummary(ProjectListItem item)`
+- `public static ProjectPageResponse toPage(Page<ProjectListItem> page)`
 - `public static ProjectCountsResponse toCounts(ProjectCounts counts)`
 - `public static ProjectDetailResponse toDetail(ProjectView view)`
+
+#### `ProjectPageResponse`
+
+*record* · `src/main/java/com/prastav/project/web/ProjectPageResponse.java`
+
+**Responsibility.** One page of the project list: the rows plus the paging numbers the UI needs to draw its pager.
+
+**Components:** `List<ProjectSummaryResponse> content, int page, int size, long totalElements, int totalPages`
 
 #### `ProjectSummaryResponse` [M1 Implemented]
 
@@ -2022,7 +2032,7 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 | GET | /users?role=FACULTY | COORDINATOR | List users (reviewer picker) | 200 `UserResponse[]` | [M1 Implemented] |
 | POST | /users | COORDINATOR | Create a FACULTY or COORDINATOR account | 201 `UserResponse` | Implemented |
 | POST | /projects | STUDENT | Create project + draft v1 | 201 `ProjectDetailResponse` | [M1 Implemented] |
-| GET | /projects?status=&q=&reviewerId=&sort=&page=&size= | any | Role-scoped list with optional filters, search, sort and paging (section 10.7) | 200 `ProjectSummaryResponse[]`, `X-Total-Count` header | Implemented |
+| GET | /projects?status=&q=&reviewerId=&sort=&page=&size= | any | Role-scoped, paged list with optional filters, search and sort (section 10.7) | 200 `ProjectPageResponse` | Implemented |
 | GET | /projects/summary | any | Role-scoped counts by status for the dashboards | 200 `ProjectCountsResponse` | Implemented |
 | GET | /projects/{id} | participant | Detail with `allowedActions` | 200 `ProjectDetailResponse` | [M1 Implemented] |
 | PUT | /projects/{id}/proposal | STUDENT owner | Edit open draft | 200 `ProposalVersionResponse` | [M1 Implemented] |
@@ -2208,26 +2218,35 @@ returns `ProjectDetailResponse` with `"status": "UNDER_REVIEW"` and `"reviewer":
 
 ### 10.7 Project list and summary
 
-`GET /api/projects` keeps its original shape (a JSON array) and adds optional query parameters. Without `page` the whole filtered list is returned.
+`GET /api/projects` returns one page of the caller's projects: a student sees own projects, faculty the projects assigned to them, the coordinator every project (`ProjectSpecifications.visibleTo`). Every parameter is optional, and filters combine with AND inside that scope. Filtering, ordering and paging all run in the database query (`ProjectRepository.findAll(Specification, Pageable)`).
 
 | Parameter | Meaning |
 |---|---|
-| `status` | One or more `ProjectStatus` values, repeated or comma-separated; an unknown value is 400 `VALIDATION_FAILED` |
-| `q` | Case-insensitive text matched against title, description, team members, owner name and reviewer name |
+| `status` | One or more `ProjectStatus` values, repeated or comma-separated |
+| `q` | Case-insensitive text contained in the title, description, team members, owner name or reviewer name |
 | `reviewerId` | Only projects assigned to this faculty member |
-| `sort` | `LATEST` (default, last update first), `OLDEST`, `TITLE` |
-| `page`, `size` | Zero-based page and page size (1 to 100, default 10) |
+| `sort` | `LATEST` (default, last update first), `OLDEST`, `TITLE`; ties are broken by id so pages never overlap |
+| `page` | Zero-based page index, default 0 |
+| `size` | Rows per page, 1 to 50, default 10 |
 
-The `X-Total-Count` response header always carries the number of matches across all pages. Each row:
+An unknown `status` or `sort`, a malformed `reviewerId`, a non-numeric or negative `page`, or a `size` outside 1 to 50 returns 400 `VALIDATION_FAILED` (for example "size must be between 1 and 50"). `GET /api/projects?status=UNDER_REVIEW&q=crop&page=0&size=10` as the coordinator:
 
 ```json
-{ "id": "0b8f6c1e-...", "title": "AI Based Crop Monitoring", "description": "Crop health analysis from drone images.",
-  "teamMembers": "Aarav Mehta, Priya Das", "status": "UNDER_REVIEW",
-  "owner": { "id": "7f1c...", "name": "Aarav Mehta" }, "reviewer": { "id": "a1b2...", "name": "Dr. Anita Rao" },
-  "submittedAt": "2026-10-19T09:20:31.004Z", "updatedAt": "2026-10-19T09:41:12.660Z" }
+{
+  "content": [
+    { "id": "0b8f6c1e-...", "title": "AI Based Crop Monitoring", "description": "Crop health analysis from drone images.",
+      "teamMembers": "Aarav Mehta, Priya Das", "status": "UNDER_REVIEW",
+      "owner": { "id": "7f1c...", "name": "Aarav Mehta" }, "reviewer": { "id": "a1b2...", "name": "Dr. Anita Rao" },
+      "submittedAt": "2026-10-19T09:20:31.004Z", "updatedAt": "2026-10-19T09:41:12.660Z" }
+  ],
+  "page": 0,
+  "size": 10,
+  "totalElements": 1,
+  "totalPages": 1
+}
 ```
 
-`submittedAt` is the first submission time of the proposal (null for a project never submitted).
+`submittedAt` is the first submission time of the proposal (null for a project never submitted). A page past the end returns an empty `content` with the real `totalElements`.
 
 `GET /api/projects/summary` counts the caller's role-scoped projects (own for a student, assigned for faculty, all for the coordinator). Every status is present; `awaitingAssignment` (SUBMITTED projects, which have no reviewer yet) is only filled for the coordinator:
 
@@ -2358,7 +2377,8 @@ The project list is not paginated (M2). The timeline is API-only (UI tab is M2).
 | `ProposalServiceTest` | sequential numbering and prefill; v1 unchanged after v2 edits; one open draft; no revision while UNDER_REVIEW; no edit when SUBMITTED; owner-only edit |
 | `ProposalVersionTest` | immutability; missing-field detection; factory numbering |
 | `ProjectServiceTest` | create in DRAFT with v1 and event; faculty cannot create; list paging, sort and first-submission time; counts per role with zero-filled statuses and awaiting-assignment for the coordinator; stranger 403; latest submitted version in detail |
-| `ProjectListQueryTest` | defaults, trimming, page-size clamping, LIKE wildcard escaping |
+| `ProjectListQueryTest` | defaults (page 0, size 10, LATEST), trimming, size bounds 1 and 50 accepted, negative page and size 0 or 51 rejected with `ValidationException`, LIKE wildcard escaping |
+| `ProjectSpecificationsTest` | role scope (student by owner, faculty by reviewer, coordinator everything), empty filters match everything, a student query combines owner scope, status and lower-case search over five columns |
 | `AuditEventListenerTest` | status change becomes an audit row with before/after and JSON details; action mapping |
 | `PatternEmailPolicyTest` | valid student email parsed to year and branch; uppercase input normalized; wrong domain, missing or malformed year or branch rejected; faculty email institutional but not a student email |
 | `InstitutionConfigTest` | the shipped `application.yml` binds `InstitutionProperties` and parses a demo student email |
@@ -2366,7 +2386,7 @@ The project list is not paginated (M2). The timeline is API-only (UI tab is M2).
 | `UserServiceTest` | coordinator creates FACULTY and COORDINATOR without the student pattern; other callers 403; STUDENT, other domain and duplicate email rejected |
 | `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400 |
 | `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project |
-| `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding and `X-Total-Count`; unknown status 400; summary body |
+| `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding and the page envelope (`content`, `page`, `size`, `totalElements`, `totalPages`); defaults for a call without parameters; 400 `VALIDATION_FAILED` for an unknown status or sort, a malformed reviewer id, a negative or non-numeric page and size 0 or 51; summary body |
 
 All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed.
 
@@ -2457,7 +2477,7 @@ The web app (`frontend/`, artifact `prastav-frontend`) is a React 18 + TypeScrip
 ### 18.3 Data flow
 
 - `src/api/client.ts` is the Axios instance. It adds the Bearer token from the stored session, clears the session and returns to `/login` on a 401, and turns any error into one readable sentence (`errorMessage`) or per-field messages (`fieldErrors`). The session is kept in `localStorage` when "Remember me" is ticked and in `sessionStorage` otherwise.
-- `src/api/endpoints.ts` has one function per endpoint and `src/api/types.ts` mirrors the backend DTOs. `listProjects` returns `{ items, total }`, taking `total` from the `X-Total-Count` header.
+- `src/api/endpoints.ts` has one function per endpoint and `src/api/types.ts` mirrors the backend DTOs. `listProjects` reads the `ProjectPageResponse` envelope and returns `{ items, total }` (`content` and `totalElements`).
 - Server state lives in TanStack Query. Keys start with `['projects']` for lists and counts, `['project', id]`, `['versions', id]`, `['reviews', id]` and `['history', id]` for one project. Every mutation invalidates the keys it affects, so lists, dashboards and the project page stay in step.
 - List filters (`status`, `q`, `reviewerId`, `sort`, `page`) live in the URL through `useProjectListParams`, so a filtered list can be shared; the search box updates the URL after a 300 ms pause and paging keeps the previous page on screen while the next one loads.
 - Buttons for workflow actions come only from `allowedActions` in `ProjectDetailResponse`. List rows, which carry no `allowedActions`, only offer shortcuts that the target page checks again (for example "Edit draft" for a DRAFT row opens the wizard, which shows "Nothing to edit" if the draft is gone).
