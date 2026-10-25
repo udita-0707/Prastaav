@@ -218,7 +218,7 @@ Base path `/api`. All except auth require `Authorization: Bearer <jwt>`.
 | GET | /auth/me | any | Current user | 1 |
 | GET | /users?role=FACULTY | COORDINATOR | List faculty for assignment | 1 |
 | POST | /projects | STUDENT | Create project + draft v1 | 1 |
-| GET | /projects | any | Role-scoped list (filter/search/page in M2) | 1 |
+| GET | /projects?status=&q=&reviewerId=&sort=&page=&size= | any | Role-scoped list with status filter, search, sort and paging; `X-Total-Count` header | 1 |
 | GET | /projects/{id} | owner/reviewer/coordinator | Project detail + current status | 1 |
 | PUT | /projects/{id}/proposal | STUDENT (owner) | Edit current draft version | 1 |
 | POST | /projects/{id}/proposals | STUDENT (owner) | Create next version draft (only in REVISION\_REQUESTED) | 1 |
@@ -229,7 +229,7 @@ Base path `/api`. All except auth require `Authorization: Bearer <jwt>`.
 | GET | /projects/{id}/reviews | participants | Review history | 1 |
 | GET | /projects/{id}/history | participants | Merged timeline (versions + reviews + status changes) | 1 |
 | GET | /projects/{id}/proposals/compare?from=1&to=2 | participants | Field-level diff | 2 |
-| GET | /dashboard/summary | COORDINATOR | Counts by status, workload | 2 |
+| GET | /projects/summary | any | Role-scoped counts by status; projects awaiting assignment for the coordinator | 2 |
 | GET | /audit | COORDINATOR | Filterable audit log | 2 |
 | GET | /notifications | any | My notifications | 2 |
 | PATCH | /notifications/{id}/read | any | Mark read | 2 |

@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300" fill="none" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="ml-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#F0F9FF"/><stop offset="1" stop-color="#E0F2FE"/></linearGradient>
+    <linearGradient id="ml-lake" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7DD3FC"/><stop offset="1" stop-color="#5EEAD4"/></linearGradient>
+  </defs>
+  <rect width="400" height="300" fill="url(#ml-sky)"/>
+  <circle cx="300" cy="70" r="26" fill="#FEF3C7"/>
+  <path d="M0 190l70-90 50 50 60-86 80 96 50-40 90 70Z" fill="#BFDBFE"/>
+  <path d="M0 200l60-60 60 50 70-70 70 66 60-44 80 58Z" fill="#93C5FD"/>
+  <path d="M180 80l12 18-24 0Z" fill="#FFFFFF" fill-opacity=".8"/>
+  <rect y="196" width="400" height="104" fill="url(#ml-lake)"/>
+  <path d="M30 220h80M150 236h110M280 214h70M60 258h90" stroke="#FFFFFF" stroke-opacity=".6" stroke-width="2" stroke-linecap="round"/>
+  <path d="M0 300V230c40-6 80 0 120 16v54Z" fill="#0F9D8F" fill-opacity=".85"/>
+  <path d="M400 300V220c-50-4-100 6-140 30v50Z" fill="#0C8478"/>
+  <g fill="#0A6B62">
+    <path d="M330 222l14-40 14 40Z"/><path d="M356 226l12-34 12 34Z"/><path d="M306 230l10-28 10 28Z"/>
+  </g>
+  <g fill="#0F9D8F">
+    <path d="M22 242l10-30 10 30Z"/><path d="M44 246l12-36 12 36Z"/>
+  </g>
+</svg>

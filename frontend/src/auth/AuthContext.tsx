@@ -5,7 +5,7 @@ import type { Role, UserResponse } from '../api/types';
 
 interface AuthState {
   user: UserResponse | null;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, remember?: boolean) => Promise<void>;
   register: (name: string, email: string, password: string, role: Role) => Promise<void>;
   logout: () => void;
 }
@@ -15,9 +15,9 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserResponse | null>(() => loadSession()?.user ?? null);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string, remember = true) => {
     const session = await endpoints.login(email, password);
-    saveSession(session);
+    saveSession(session, remember);
     setUser(session.user);
   }, []);
 

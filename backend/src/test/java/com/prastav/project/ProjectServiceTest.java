@@ -12,15 +12,26 @@ import com.prastav.workflow.AllowedActionsResolver;
 import com.prastav.workflow.ProjectStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -74,15 +85,79 @@ class ProjectServiceTest {
     }
 
     @Test
-    void listIsScopedByRole() {
-        List<Project> mine = List.of(TestData.project(owner));
-        when(projectRepository.findByOwner_IdOrderByUpdatedAtDesc(owner.getId())).thenReturn(mine);
-        when(projectRepository.findByReviewer_IdOrderByUpdatedAtDesc(reviewer.getId())).thenReturn(List.of());
-        when(projectRepository.findAllByOrderByUpdatedAtDesc()).thenReturn(mine);
+    @SuppressWarnings("unchecked")
+    void listPassesPagingAndSortAndAddsFirstSubmissionTime() {
+        Project submitted = TestData.project(owner);
+        Project draft = TestData.project(owner);
+        Instant firstSubmitted = Instant.parse("2026-01-10T09:00:00Z");
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        when(projectRepository.findAll(any(Specification.class), pageable.capture()))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(submitted, draft), invocation.getArgument(1), 12));
+        when(proposalService.firstSubmittedAt(anyCollection())).thenReturn(Map.of(submitted.getId(), firstSubmitted));
 
-        assertEquals(mine, projectService.listProjects(TestData.actor(owner)));
-        assertEquals(List.of(), projectService.listProjects(TestData.actor(reviewer)));
-        assertEquals(mine, projectService.listProjects(TestData.actor(TestData.coordinator())));
+        Page<ProjectListItem> page = projectService.listProjects(TestData.actor(owner),
+                new ProjectListQuery(Set.of(ProjectStatus.SUBMITTED), " smart ", null, ProjectSort.TITLE, 1, 2));
+
+        assertEquals(PageRequest.of(1, 2, ProjectSort.TITLE.toSort()), pageable.getValue());
+        assertEquals(12, page.getTotalElements());
+        assertEquals(firstSubmitted, page.getContent().get(0).submittedAt());
+        assertNull(page.getContent().get(1).submittedAt());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void listWithoutPageReturnsEverythingSortedLatestFirst() {
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        when(projectRepository.findAll(any(Specification.class), pageable.capture())).thenReturn(Page.empty());
+
+        projectService.listProjects(TestData.actor(owner), ProjectListQuery.all());
+
+        assertEquals(false, pageable.getValue().isPaged());
+        assertEquals(Sort.Order.desc("updatedAt"), pageable.getValue().getSort().getOrderFor("updatedAt"));
+    }
+
+    @Test
+    void countsUseTheRoleScopeAndFillMissingStatuses() {
+        when(projectRepository.countByStatusForOwner(owner.getId()))
+                .thenReturn(List.of(count(ProjectStatus.DRAFT, 2), count(ProjectStatus.APPROVED, 1)));
+        when(projectRepository.countByStatusForReviewer(reviewer.getId()))
+                .thenReturn(List.of(count(ProjectStatus.UNDER_REVIEW, 3)));
+
+        ProjectCounts student = projectService.countProjects(TestData.actor(owner));
+        ProjectCounts faculty = projectService.countProjects(TestData.actor(reviewer));
+
+        assertEquals(3, student.total());
+        assertEquals(2L, student.byStatus().get(ProjectStatus.DRAFT));
+        assertEquals(0L, student.byStatus().get(ProjectStatus.REJECTED));
+        assertEquals(ProjectStatus.values().length, student.byStatus().size());
+        assertNull(student.awaitingAssignment());
+        assertEquals(3, faculty.total());
+        assertNull(faculty.awaitingAssignment());
+    }
+
+    @Test
+    void coordinatorCountsIncludeProjectsAwaitingAssignment() {
+        when(projectRepository.countByStatus())
+                .thenReturn(List.of(count(ProjectStatus.SUBMITTED, 4), count(ProjectStatus.UNDER_REVIEW, 1)));
+
+        ProjectCounts counts = projectService.countProjects(TestData.actor(TestData.coordinator()));
+
+        assertEquals(5, counts.total());
+        assertEquals(4L, counts.awaitingAssignment());
+    }
+
+    private static ProjectStatusCount count(ProjectStatus status, long count) {
+        return new ProjectStatusCount() {
+            @Override
+            public ProjectStatus getStatus() {
+                return status;
+            }
+
+            @Override
+            public long getCount() {
+                return count;
+            }
+        };
     }
 
     @Test
