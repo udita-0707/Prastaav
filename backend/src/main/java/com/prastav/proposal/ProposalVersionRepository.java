@@ -15,6 +15,8 @@ public interface ProposalVersionRepository extends JpaRepository<ProposalVersion
 
     Optional<ProposalVersion> findFirstByProject_IdOrderByVersionNumberDesc(UUID projectId);
 
+    Optional<ProposalVersion> findByProject_IdAndVersionNumber(UUID projectId, int versionNumber);
+
     Optional<ProposalVersion> findFirstByProject_IdAndStateOrderByVersionNumberDesc(UUID projectId,
                                                                                      ProposalVersionState state);
 
