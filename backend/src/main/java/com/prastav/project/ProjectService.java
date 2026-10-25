@@ -61,10 +61,14 @@ public class ProjectService {
 
     /**
      * Business rule 1 (students see their own, faculty their assigned, the coordinator all projects),
-     * narrowed by the optional filters in {@code query}.
+     * narrowed by the optional filters in {@code query}. Only the coordinator may filter by the owner's
+     * admission year or branch; anyone else passing them gets FORBIDDEN.
      */
     @Transactional(readOnly = true)
     public Page<ProjectListItem> listProjects(Actor actor, ProjectListQuery query) {
+        if (query.filtersByCohort()) {
+            accessPolicy.requireRole(actor, Role.COORDINATOR);
+        }
         Page<Project> page = projectRepository.findAll(ProjectSpecifications.forQuery(actor, query), query.pageable());
         Map<UUID, Instant> submittedAt = proposalService.firstSubmittedAt(page.map(Project::getId).getContent());
         return page.map(project -> new ProjectListItem(project, submittedAt.get(project.getId())));

@@ -58,19 +58,24 @@ public class ProjectController {
     @GetMapping
     @Operation(summary = "Role-scoped, paged project list with optional filters",
             description = "Students see their own projects, faculty their assigned ones, the coordinator all. "
-                    + "A negative page or a size outside 1 to 50 is rejected with VALIDATION_FAILED.")
+                    + "A negative page or a size outside 1 to 50 is rejected with VALIDATION_FAILED. "
+                    + "admissionYear and branch are coordinator-only; other roles passing them get FORBIDDEN.")
     public ProjectPageResponse list(
             @Parameter(description = "One or more statuses (repeat the parameter or separate with commas)")
             @RequestParam(required = false) List<ProjectStatus> status,
             @Parameter(description = "Text matched against title, description, team, owner and reviewer names")
             @RequestParam(required = false) String q,
             @RequestParam(required = false) UUID reviewerId,
+            @Parameter(description = "Coordinator only: owner's admission year, e.g. 2023")
+            @RequestParam(required = false) Integer admissionYear,
+            @Parameter(description = "Coordinator only: owner's branch, e.g. CSAI (case-insensitive)")
+            @RequestParam(required = false) String branch,
             @RequestParam(required = false) ProjectSort sort,
             @Parameter(description = "Zero-based page index (default 0)") @RequestParam(required = false) Integer page,
             @Parameter(description = "Page size, 1 to 50 (default 10)") @RequestParam(required = false) Integer size,
             @AuthenticationPrincipal Actor actor) {
         ProjectListQuery query = ProjectListQuery.of(
-                status == null ? null : new HashSet<>(status), q, reviewerId, sort, page, size);
+                status == null ? null : new HashSet<>(status), q, reviewerId, admissionYear, branch, sort, page, size);
         return ProjectMapper.toPage(projectService.listProjects(actor, query));
     }
 

@@ -34,6 +34,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ProjectServiceTest {
@@ -96,7 +97,7 @@ class ProjectServiceTest {
         when(proposalService.firstSubmittedAt(anyCollection())).thenReturn(Map.of(submitted.getId(), firstSubmitted));
 
         Page<ProjectListItem> page = projectService.listProjects(TestData.actor(owner),
-                new ProjectListQuery(Set.of(ProjectStatus.SUBMITTED), " smart ", null, ProjectSort.TITLE, 1, 2));
+                new ProjectListQuery(Set.of(ProjectStatus.SUBMITTED), " smart ", null, null, null, ProjectSort.TITLE, 1, 2));
 
         assertEquals(PageRequest.of(1, 2, ProjectSort.TITLE.toSort()), pageable.getValue());
         assertEquals(12, page.getTotalElements());
@@ -110,11 +111,32 @@ class ProjectServiceTest {
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         when(projectRepository.findAll(any(Specification.class), pageable.capture())).thenReturn(Page.empty());
 
-        projectService.listProjects(TestData.actor(owner), ProjectListQuery.of(null, null, null, null, null, null));
+        projectService.listProjects(TestData.actor(owner), ProjectListQuery.of(null, null, null, null, null, null, null, null));
 
         assertEquals(0, pageable.getValue().getPageNumber());
         assertEquals(10, pageable.getValue().getPageSize());
         assertEquals(Sort.Order.desc("updatedAt"), pageable.getValue().getSort().getOrderFor("updatedAt"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void coordinatorCanFilterByAdmissionYearAndBranch() {
+        when(projectRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
+
+        projectService.listProjects(TestData.actor(TestData.coordinator()),
+                ProjectListQuery.of(null, null, null, 2023, "csai", null, null, null));
+
+        verify(projectRepository).findAll(any(Specification.class), any(Pageable.class));
+    }
+
+    @Test
+    void nonCoordinatorPassingCohortFiltersIsForbidden() {
+        ProjectListQuery byYear = ProjectListQuery.of(null, null, null, 2023, null, null, null, null);
+        ProjectListQuery byBranch = ProjectListQuery.of(null, null, null, null, "CSAI", null, null, null);
+
+        assertThrows(ForbiddenException.class, () -> projectService.listProjects(TestData.actor(owner), byYear));
+        assertThrows(ForbiddenException.class, () -> projectService.listProjects(TestData.actor(reviewer), byBranch));
+        verifyNoInteractions(projectRepository);
     }
 
     @Test

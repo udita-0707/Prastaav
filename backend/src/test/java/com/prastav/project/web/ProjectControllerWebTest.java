@@ -6,6 +6,7 @@ import com.prastav.auth.RestAuthErrorHandler;
 import com.prastav.auth.Role;
 import com.prastav.auth.SecurityConfig;
 import com.prastav.auth.User;
+import com.prastav.common.ForbiddenException;
 import com.prastav.project.Project;
 import com.prastav.project.ProjectCounts;
 import com.prastav.project.ProjectHistoryService;
@@ -115,6 +116,8 @@ class ProjectControllerWebTest {
                         .param("status", "SUBMITTED,UNDER_REVIEW")
                         .param("q", "crop")
                         .param("reviewerId", reviewerId.toString())
+                        .param("admissionYear", "2023")
+                        .param("branch", "csai")
                         .param("sort", "OLDEST")
                         .param("page", "1")
                         .param("size", "5")
@@ -131,6 +134,8 @@ class ProjectControllerWebTest {
         assertEquals(Set.of(ProjectStatus.SUBMITTED, ProjectStatus.UNDER_REVIEW), bound.statuses());
         assertEquals("crop", bound.q());
         assertEquals(reviewerId, bound.reviewerId());
+        assertEquals(2023, bound.admissionYear());
+        assertEquals("CSAI", bound.branch());
         assertEquals(ProjectSort.OLDEST, bound.sort());
         assertEquals(1, bound.page());
         assertEquals(5, bound.size());
@@ -157,12 +162,22 @@ class ProjectControllerWebTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"status,PENDING", "sort,NEWEST", "page,-1", "page,first", "size,0", "size,51", "reviewerId,not-a-uuid"})
+    @CsvSource({"status,PENDING", "sort,NEWEST", "page,-1", "page,first", "size,0", "size,51", "reviewerId,not-a-uuid", "admissionYear,twenty"})
     void invalidListParameterIsA400(String name, String value) throws Exception {
         mockMvc.perform(get("/api/projects").param(name, value).header("Authorization", bearer(Role.STUDENT)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
         verifyNoInteractions(projectService);
+    }
+
+    @Test
+    void cohortFilterFromAStudentIsA403() throws Exception {
+        when(projectService.listProjects(any(Actor.class), any(ProjectListQuery.class)))
+                .thenThrow(new ForbiddenException("This action requires the COORDINATOR role"));
+
+        mockMvc.perform(get("/api/projects").param("branch", "CSAI").header("Authorization", bearer(Role.STUDENT)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
     }
 
     @Test
