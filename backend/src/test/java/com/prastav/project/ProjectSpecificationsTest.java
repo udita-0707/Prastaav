@@ -99,6 +99,37 @@ class ProjectSpecificationsTest {
     }
 
     @Test
+    void ownerCohortConstrainsTheOwnersAdmissionYearAndBranch() {
+        Path<Object> owner = (Path<Object>) root.get("owner");
+        Path<Object> admissionYear = mock(Path.class);
+        Path<Object> branch = mock(Path.class);
+        when(owner.get("admissionYear")).thenReturn(admissionYear);
+        when(owner.get("branch")).thenReturn(branch);
+        Predicate year = mock(Predicate.class);
+        Predicate inBranch = mock(Predicate.class);
+        Predicate both = mock(Predicate.class);
+        when(cb.equal(admissionYear, 2023)).thenReturn(year);
+        when(cb.equal(branch, "CSAI")).thenReturn(inBranch);
+        when(cb.and(year, inBranch)).thenReturn(both);
+
+        assertSame(both, ProjectSpecifications.ownerCohort(2023, "CSAI").toPredicate(root, criteriaQuery, cb));
+    }
+
+    @Test
+    void ownerCohortWithOnlyAYearLeavesTheBranchOpen() {
+        Path<Object> owner = (Path<Object>) root.get("owner");
+        Path<Object> admissionYear = mock(Path.class);
+        when(owner.get("admissionYear")).thenReturn(admissionYear);
+        Predicate year = mock(Predicate.class);
+        when(cb.equal(admissionYear, 2024)).thenReturn(year);
+
+        ProjectSpecifications.ownerCohort(2024, null).toPredicate(root, criteriaQuery, cb);
+
+        verify(cb).and(year, everything);
+        verify(owner, never()).get("branch");
+    }
+
+    @Test
     void studentQueryCombinesOwnerScopeStatusAndCaseInsensitiveSearch() {
         Actor student = actor(Role.STUDENT);
         Join<Project, User> owner = mock(Join.class);
@@ -108,7 +139,7 @@ class ProjectSpecificationsTest {
         when(cb.lower(any())).thenReturn(mock(Expression.class));
         when(cb.and(any(Predicate.class), any(Predicate.class))).thenReturn(mock(Predicate.class));
         Set<ProjectStatus> statuses = Set.of(ProjectStatus.DRAFT, ProjectStatus.SUBMITTED);
-        ProjectListQuery query = ProjectListQuery.of(statuses, " Crop ", null, null, null, null);
+        ProjectListQuery query = ProjectListQuery.of(statuses, " Crop ", null, null, null, null, null, null);
 
         ProjectSpecifications.forQuery(student, query).toPredicate(root, criteriaQuery, cb);
 
