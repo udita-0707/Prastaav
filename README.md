@@ -10,7 +10,7 @@
 - Submit the proposal; the submitted version is frozen.
 - Follow the status on the home dashboard (totals, drafts, in review, approved) and get an alert when a reviewer requests changes.
 - Read the reviewer's feedback, start the next version (prefilled from the last one) and resubmit it to the same reviewer.
-- Browse earlier versions, reviews and the full timeline of a project.
+- Browse earlier versions, reviews and the full timeline of a project, and compare any two versions field by field.
 
 **Faculty**
 - See the projects assigned to you, with counts of pending reviews and projects awaiting student changes.
@@ -160,6 +160,7 @@ Base path `/api`; every endpoint except register, login and Swagger needs `Autho
 | GET | `/projects/{id}` | participant | Project detail with `allowedActions` |
 | PUT | `/projects/{id}/proposal` | student owner | Edit the open draft |
 | POST / GET | `/projects/{id}/proposals` | student owner / participant | Start the next version / list versions |
+| GET | `/projects/{id}/proposals/compare?from=&to=` | participant | Field-by-field comparison of two versions: `{ fromVersion, toVersion, fields: [{ name, fromValue, toValue, changed }] }`; a version outside the project gives `404 NOT_FOUND`, the same version twice `400 VALIDATION_FAILED` |
 | POST | `/projects/{id}/submit` | student owner | Submit or resubmit |
 | POST | `/projects/{id}/assign` | coordinator | Assign a faculty reviewer |
 | POST / GET | `/projects/{id}/reviews` | assigned faculty / participant | Record a decision / list reviews |
