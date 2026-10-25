@@ -26,6 +26,9 @@ export interface UserResponse {
   name: string;
   email: string;
   role: Role;
+  /** Students only. */
+  admissionYear: number | null;
+  branch: string | null;
 }
 
 export interface UserSummary {
