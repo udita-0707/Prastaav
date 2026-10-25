@@ -50,7 +50,7 @@ Product decisions: one assigned faculty reviewer per project; a REJECTED project
 | FR-11 | Project timeline view (all versions, reviews, status changes in order) |
 | FR-12 | Role-scoped project lists with status filter, case-insensitive search and pagination (page from 0, size 1 to 50, default 10); filtering and paging run in the database; invalid parameters are rejected with `VALIDATION_FAILED` |
 | FR-13 | In-app notifications on assignment, review decision, resubmission, delivered through the configured channels (in-app inbox; email written to the log), each retried a configured number of times |
-| FR-14 | Compare two proposal versions (field-level diff) |
+| FR-14 | Compare two proposal versions of one project field by field: every proposal field with its value in each version and whether it changed; project participants only; a version outside the project is `NOT_FOUND`, the same version on both sides is `VALIDATION_FAILED` |
 | FR-15 | Coordinator dashboard: counts by status, pending-assignment list, reviewer workload |
 | FR-16 | Coordinator audit-log viewer with filters |
 | FR-17 | Reassign reviewer (with audit entry) |
@@ -225,6 +225,7 @@ Base path `/api`. All except auth require `Authorization: Bearer <jwt>`.
 | PUT | /projects/{id}/proposal | STUDENT (owner) | Edit current draft version |
 | POST | /projects/{id}/proposals | STUDENT (owner) | Create next version draft (only in REVISION\_REQUESTED) |
 | GET | /projects/{id}/proposals | participants | All versions |
+| GET | /projects/{id}/proposals/compare?from=&to= | participants | Field-by-field comparison of two versions (FR-14) |
 | POST | /projects/{id}/submit | STUDENT (owner) | Submit / resubmit (state decides) |
 | POST | /projects/{id}/assign | COORDINATOR | Body: facultyId |
 | POST | /projects/{id}/reviews | FACULTY (assigned) | Body: decision, comments |

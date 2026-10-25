@@ -55,6 +55,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-11 | Project timeline | `ProjectHistoryService`, `GET /api/projects/{id}/history`, Timeline tab of the project page |
 | FR-12 | Role-scoped lists with status filter, search, pagination | `ProjectService.listProjects`, `ProjectListQuery`, `ProjectSpecifications`, `GET /api/projects?status=&q=&reviewerId=&sort=&page=&size=` |
 | FR-13 | In-app notifications stored per recipient with a read flag; inbox, unread count and mark-read scoped to the recipient; delivery through the configured channels (in-app, email log) | `Notification`, `NotificationRepository`, `NotificationService`, `NotificationMapper`, `NotificationDispatcher`, `NotificationChannel`, `V4__notifications.sql` |
+| FR-14 | Compare two proposal versions field by field | `ProposalDiffService`, `ProposalDiff`, `FieldDiff`, `ProposalVersionRepository.findByProject_IdAndVersionNumber`, `GET /api/projects/{id}/proposals/compare?from=&to=` |
 | FR-15 | Role dashboards: counts per status and projects awaiting assignment | `ProjectService.countProjects`, `GET /api/projects/summary`, web app home pages |
 | FR-18 | Institution profile and email policy: institutional domain for every account; student-only registration with `<firstname>.<YY><branch>@domain`, storing admission year and branch; staff accounts created by the coordinator | `InstitutionProperties`, `EmailPolicy`, `PatternEmailPolicy`, `AuthService.register`, `UserService.createAccount`, `POST /api/users`, `V3__user_institution_profile.sql` |
 
@@ -67,8 +68,8 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, channels and retries | 141 tests in `backend/src/test/java` (see section 16) |
-| MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | `ProjectControllerWebTest` (13 tests), `UserControllerWebTest` (4 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, channels and retries | 153 tests in `backend/src/test/java` (see section 16) |
+| MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | `ProjectControllerWebTest` (13 tests), `ProposalControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
 
@@ -136,7 +137,7 @@ com.prastav
 │              ProjectSummaryResponse, ProjectDetailResponse, ProjectCountsResponse, ProjectMapper
 ├─ proposal    ProposalVersion, ProposalVersionState, ProposalContent, ProposalVersionFactory,
 │              ProposalVersionRepository, ProposalService, ProposalVersionCreatedEvent,
-│              ProposalDraftUpdatedEvent, FirstSubmission
+│              ProposalDraftUpdatedEvent, FirstSubmission, ProposalDiffService, ProposalDiff, FieldDiff
 │  └─ web      ProposalController, ProposalVersionResponse, ProposalMapper
 ├─ review      Review, ReviewDecision, ReviewRepository, ReviewService, ReviewDecisionHandler,
 │              ApproveDecisionHandler, RequestRevisionDecisionHandler, RejectDecisionHandler,
@@ -1307,6 +1308,14 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public static ProposalContent empty()`
 
+#### `FieldDiff`
+
+*record* · `src/main/java/com/prastav/proposal/FieldDiff.java`
+
+**Responsibility.** One proposal field in a version comparison: its value in both versions and whether it changed.
+
+**Components:** `String name, String fromValue, String toValue, boolean changed`
+
 #### `FirstSubmission`
 
 *interface* · `src/main/java/com/prastav/proposal/FirstSubmission.java`
@@ -1317,6 +1326,31 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `UUID getProjectId()`
 - `Instant getSubmittedAt()`
+
+#### `ProposalDiff`
+
+*record* · `src/main/java/com/prastav/proposal/ProposalDiff.java`
+
+**Responsibility.** Field-by-field comparison of two proposal versions (FR-14). A read model, not an entity.
+
+**Components:** `int fromVersion, int toVersion, List<FieldDiff> fields`
+
+#### `ProposalDiffService`
+
+*class* · @Service · `src/main/java/com/prastav/proposal/ProposalDiffService.java`
+
+**Responsibility.** FR-14: compares two versions of one project's proposal field by field, in the order the proposal form shows them. Every field is returned, changed or not, so the UI can show both versions side by side.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `versionRepository` | `ProposalVersionRepository` | private |
+| `projectStore` | `ProjectStore` | private |
+| `accessPolicy` | `ProjectAccessPolicy` | private |
+
+**Methods:**
+
+- `public ProposalDiffService(ProposalVersionRepository versionRepository, ProjectStore projectStore, ProjectAccessPolicy accessPolicy)`
+- `public ProposalDiff compare(UUID projectId, int fromVersion, int toVersion, Actor actor)`: checks `requireView` first, then rejects `fromVersion == toVersion` with `ValidationException`, then loads both versions of this project (`NotFoundException` "Proposal version N not found" when either is missing); `changed` is `!Objects.equals(fromValue, toValue)`
 
 #### `ProposalDraftUpdatedEvent`
 
@@ -1424,6 +1458,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `List<ProposalVersion> findByProject_IdOrderByVersionNumberAsc(UUID projectId)`
 - `Optional<ProposalVersion> findFirstByProject_IdOrderByVersionNumberDesc(UUID projectId)`
+- `Optional<ProposalVersion> findByProject_IdAndVersionNumber(UUID projectId, int versionNumber)`: served by the unique constraint `uq_proposal_project_version`
 - `Optional<ProposalVersion> findFirstByProject_IdAndStateOrderByVersionNumberDesc(UUID projectId, ProposalVersionState state)`
 - `List<FirstSubmission> findFirstSubmissions(Collection<UUID> projectIds)`
 
@@ -1447,13 +1482,15 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 | Field | Type | Visibility |
 |---|---|---|
 | `proposalService` | `ProposalService` | private |
+| `proposalDiffService` | `ProposalDiffService` | private |
 
 **Methods:**
 
-- `public ProposalController(ProposalService proposalService)`
+- `public ProposalController(ProposalService proposalService, ProposalDiffService proposalDiffService)`
 - `public ProposalVersionResponse updateDraft(UUID projectId, ProposalContent content, Actor actor)`
 - `public ProposalVersionResponse createNextVersion(UUID projectId, Actor actor)`
 - `public List<ProposalVersionResponse> list(UUID projectId, Actor actor)`
+- `public ProposalDiff compare(UUID projectId, int from, int to, Actor actor)`
 
 #### `ProposalMapper`
 
@@ -2075,6 +2112,7 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 | PUT | /projects/{id}/proposal | STUDENT owner | Edit open draft | 200 `ProposalVersionResponse` |
 | POST | /projects/{id}/proposals | STUDENT owner | Create next version (REVISION_REQUESTED only) | 201 `ProposalVersionResponse` |
 | GET | /projects/{id}/proposals | participant | All versions | 200 `ProposalVersionResponse[]` |
+| GET | /projects/{id}/proposals/compare?from=&to= | participant | Field-by-field comparison of two versions (section 10.3) | 200 `ProposalDiff` |
 | POST | /projects/{id}/submit | STUDENT owner | Submit or resubmit | 200 `ProjectDetailResponse` |
 | POST | /projects/{id}/assign | COORDINATOR | Assign reviewer | 200 `ProjectDetailResponse` |
 | POST | /projects/{id}/reviews | FACULTY assigned | Record decision | 201 `ReviewResponse` |
@@ -2175,6 +2213,25 @@ Rules: `role` is optional and only STUDENT is accepted; the email must be on `pr
 `POST /api/projects/{id}/proposals` (no body) returns `201` with version N+1 in state DRAFT, prefilled from version N. A second call while that draft is open returns 409 "Version 2 is already an open draft".
 
 `GET /api/projects/{id}/proposals` returns all versions oldest first; submitted versions have `"state": "SUBMITTED"` and a `submittedAt`.
+
+`GET /api/projects/{id}/proposals/compare?from=1&to=2` (any participant: the owner, the assigned faculty, the coordinator) returns every proposal field in form order, with its value in each version and whether it changed:
+
+```json
+{
+  "fromVersion": 1,
+  "toVersion": 2,
+  "fields": [
+    { "name": "problemStatement", "fromValue": "Paper-based approvals are slow", "toValue": "Paper-based approvals are slow", "changed": false },
+    { "name": "objectives", "fromValue": "Digitise the approval flow", "toValue": "Digitise the approval flow", "changed": false },
+    { "name": "methodology", "fromValue": "Spring Boot + React", "toValue": "Spring Boot + React + PostgreSQL", "changed": true },
+    { "name": "expectedOutcome", "fromValue": "A working workflow system", "toValue": "A working workflow system", "changed": false },
+    { "name": "timeline", "fromValue": "8 weeks", "toValue": "10 weeks", "changed": true },
+    { "name": "referenceLink", "fromValue": "https://example.org/ref", "toValue": null, "changed": true }
+  ]
+}
+```
+
+`from` may be greater than `to`; the sides are reported as given. Either version may be a draft. A version number that does not exist in this project returns 404 `NOT_FOUND` ("Proposal version 7 not found"); `from` equal to `to` returns 400 `VALIDATION_FAILED` ("from and to must be different versions"); a missing or non-numeric `from` or `to` returns 400 `VALIDATION_FAILED`; a caller who is not a participant gets 403 `FORBIDDEN`. Access is checked before anything else.
 
 ### 10.4 Submit and assign
 
@@ -2385,6 +2442,7 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `ReviewServiceTest` | strategy lookup per decision; review stored against latest submitted version; stale version 409 before any transition; failed transition stores nothing; non-participant 403 |
 | `ProposalServiceTest` | sequential numbering and prefill; v1 unchanged after v2 edits; one open draft; no revision while UNDER_REVIEW; no edit when SUBMITTED; owner-only edit |
 | `ProposalVersionTest` | immutability; missing-field detection; factory numbering |
+| `ProposalDiffServiceTest` | every field in form order with fromValue, toValue and changed; identical versions have no changed field and reversed order is kept; version outside the project 404; same version 400 before any read; non-participant student and unassigned faculty 403 before any read; coordinator can compare |
 | `ProjectServiceTest` | create in DRAFT with v1 and event; faculty cannot create; list paging, sort and first-submission time; counts per role with zero-filled statuses and awaiting-assignment for the coordinator; stranger 403; latest submitted version in detail |
 | `ProjectListQueryTest` | defaults (page 0, size 10, LATEST), trimming, size bounds 1 and 50 accepted, negative page and size 0 or 51 rejected with `ValidationException`, LIKE wildcard escaping |
 | `ProjectSpecificationsTest` | role scope (student by owner, faculty by reviewer, coordinator everything), empty filters match everything, a student query combines owner scope, status and lower-case search over five columns |
@@ -2393,6 +2451,7 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `InstitutionConfigTest` | the shipped `application.yml` binds `InstitutionProperties` and parses a demo student email |
 | `AuthServiceTest` | student registration stores admission year and branch; omitted role means STUDENT; FACULTY and COORDINATOR, faculty-style email, other domain and duplicate email rejected |
 | `UserServiceTest` | coordinator creates FACULTY and COORDINATOR without the student pattern; other callers 403; STUDENT, other domain and duplicate email rejected |
+| `ProposalControllerWebTest` (MockMvc, `@WebMvcTest`) | compare body (`fromVersion`, `toVersion`, `fields[]`); 404, 400 and 403 error bodies; missing or non-numeric version 400 without calling the service; 401 without token |
 | `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400 |
 | `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project |
 | `NotificationDispatcherTest` | every enabled channel called in configured order; a throwing channel is retried up to max attempts and does not stop the others; every channel is wrapped in the retry decorator; a channel left out of the configuration is never called; unknown channel name rejected |

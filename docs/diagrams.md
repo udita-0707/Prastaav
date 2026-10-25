@@ -138,6 +138,22 @@ classDiagram
     referenceLink
     +empty()$ ProposalContent
   }
+  class ProposalDiff {
+    <<record>>
+    fromVersion
+    toVersion
+    fields
+  }
+  class FieldDiff {
+    <<record>>
+    name
+    fromValue
+    toValue
+    changed
+  }
+  class ProposalDiffService {
+    +compare(UUID projectId, int fromVersion, int toVersion, Actor actor) ProposalDiff
+  }
   class Review {
     -Project project
     -ProposalVersion proposalVersion
@@ -203,6 +219,9 @@ classDiagram
   ProposalVersion --> ProposalVersionState
   ProposalVersion ..> ProposalContent
   ProposalVersion "1" -- "*" Review
+  ProposalDiffService ..> ProposalVersion : compares two
+  ProposalDiffService ..> ProposalDiff : creates
+  ProposalDiff "1" *-- "6" FieldDiff : fields
   Review --> ReviewDecision
   Review "*" --> "1" User : reviewer
   AuditLog --> AuditAction

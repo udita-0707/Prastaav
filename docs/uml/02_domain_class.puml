@@ -112,6 +112,23 @@ class ProposalContent <<record>> {
   + {static} empty() : ProposalContent
 }
 
+class ProposalDiff <<record>> {
+  fromVersion : int
+  toVersion : int
+  fields : List<FieldDiff>
+}
+
+class FieldDiff <<record>> {
+  name : String
+  fromValue : String
+  toValue : String
+  changed : boolean
+}
+
+class ProposalDiffService {
+  + compare(projectId : UUID, fromVersion : int, toVersion : int, actor : Actor) : ProposalDiff
+}
+
 class Review {
   - project : Project
   - proposalVersion : ProposalVersion
@@ -181,6 +198,9 @@ Project "1" *-- "1..*" ProposalVersion : versions
 ProposalVersion --> ProposalVersionState
 ProposalVersion ..> ProposalContent : creates/reads
 ProposalVersion "1" -- "*" Review : reviewed in
+ProposalDiffService ..> ProposalVersion : compares two
+ProposalDiffService ..> ProposalDiff : creates
+ProposalDiff "1" *-- "6" FieldDiff : fields
 Review --> ReviewDecision
 Review "*" --> "1" User : reviewer
 AuditLog --> AuditAction
