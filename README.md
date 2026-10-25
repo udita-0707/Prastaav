@@ -40,7 +40,7 @@ The mockups the screens follow are in [`docs/design`](docs/design/README.md).
 
 ## Architecture
 
-A **modular monolith**: one Spring Boot application and one PostgreSQL database, organised by module (`auth`, `project`, `proposal`, `review`, `workflow`, `audit`, `common`). The workflow engine uses the State pattern: each project status is a class that owns its legal actions, so an illegal transition is rejected with `409 ILLEGAL_TRANSITION`. Domain events feed the audit log. The API returns `allowedActions` for the caller with every project, and the web app only shows the buttons the backend allows.
+A **modular monolith**: one Spring Boot application and one PostgreSQL database, organised by module (`auth`, `project`, `proposal`, `review`, `workflow`, `audit`, `notification`, `common`). The workflow engine uses the State pattern: each project status is a class that owns its legal actions, so an illegal transition is rejected with `409 ILLEGAL_TRANSITION`. Domain events feed the audit log. The API returns `allowedActions` for the caller with every project, and the web app only shows the buttons the backend allows.
 
 The web app is a React single-page app. Pages are composed from a small design system (`frontend/src/components/ui`), data comes from the REST API through TanStack Query, and list filters live in the URL so a filtered list can be shared. See `docs/LLD.md` for the full design, including the frontend architecture.
 
@@ -130,6 +130,7 @@ backend/src/main/java/com/prastav/
   proposal/   immutable versions, factory, draft editing  (+ web/)
   review/     review decisions as strategies               (+ web/)
   audit/      append-only audit log fed by domain events
+  notification/ in-app notifications: entity, per-user inbox queries, read flags (+ web/ DTO and mapper)
 backend/src/main/resources/db/migration/   Flyway migrations
 frontend/
   public/brand/          logo, logo mark, favicon
@@ -165,7 +166,7 @@ cd frontend && npm run typecheck           # TypeScript type check
 cd frontend && npm run build               # type check and production build
 ```
 
-Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery` and the audit listener. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters and the summary endpoint.
+Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery`, the audit listener and `NotificationService` (inbox scoping, unread count, read ownership). `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters and the summary endpoint.
 
 ## Design patterns
 

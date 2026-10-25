@@ -153,16 +153,16 @@ classDiagram
     STATUS_CHANGED
   }
   class Notification {
-    <<M2>>
-    -User user
-    -UUID projectId
+    -User recipient
+    -Project project
     -NotificationType type
     -String message
     -boolean read
     +markRead()
+    +isAddressedTo(UUID userId) boolean
   }
   class NotificationType {
-    <<M2>>
+    <<enumeration>>
     REVIEWER_ASSIGNED
     REVIEW_DECISION
     RESUBMITTED
@@ -185,10 +185,8 @@ classDiagram
   Review "*" --> "1" User : reviewer
   AuditLog --> AuditAction
   Notification --> NotificationType
-  Notification ..> User
-  classDef m2 fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
-  style Notification fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
-  style NotificationType fill:#eeeeee,stroke:#9e9e9e,stroke-dasharray:5 5,color:#757575
+  Notification "*" --> "1" User : recipient
+  Notification "*" --> "0..1" Project : project
 ```
 
 ## 3. Workflow engine: State pattern
@@ -455,7 +453,8 @@ erDiagram
   users ||--o{ reviews : writes
   projects |o--o{ audit_logs : "logged in"
   users ||--o{ audit_logs : "acts in"
-  users ||--o{ notifications_M2_PLANNED : receives
+  users ||--o{ notifications : receives
+  projects |o--o{ notifications : about
   users {
     UUID id PK
     VARCHAR name
@@ -511,12 +510,12 @@ erDiagram
     TEXT details
     TIMESTAMPTZ created_at
   }
-  notifications_M2_PLANNED {
+  notifications {
     UUID id PK
-    UUID user_id FK
-    UUID project_id FK
+    UUID recipient_id FK "indexed with is_read and with created_at"
+    UUID project_id FK "nullable"
     VARCHAR type
-    TEXT message
+    VARCHAR message
     BOOLEAN is_read
     TIMESTAMPTZ created_at
   }
