@@ -53,7 +53,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-9 | Invalid transitions rejected with clear error | `ProjectState` default methods, `IllegalTransitionException`, `GlobalExceptionHandler` (409) |
 | FR-10 | Audit log for every state change, assignment, submission, review | `AuditEventListener`, `AuditLog`, append-only trigger |
 | FR-11 | Project timeline | `ProjectHistoryService`, `GET /api/projects/{id}/history`, Timeline tab of the project page |
-| FR-12 | Role-scoped lists with status filter, search, pagination | `ProjectService.listProjects`, `ProjectListQuery`, `ProjectSpecifications`, `GET /api/projects?status=&q=&reviewerId=&sort=&page=&size=` |
+| FR-12 | Role-scoped lists with status filter, search, coordinator batch filter, pagination | `ProjectService.listProjects`, `ProjectListQuery`, `ProjectSpecifications`, `GET /api/projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size=` |
 | FR-13 | In-app notifications stored per recipient with a read flag; inbox, unread count and mark-read scoped to the recipient; delivery through the configured channels (in-app, email log) | `Notification`, `NotificationRepository`, `NotificationService`, `NotificationMapper`, `NotificationDispatcher`, `NotificationChannel`, `V4__notifications.sql` |
 | FR-15 | Role dashboards: counts per status and projects awaiting assignment | `ProjectService.countProjects`, `GET /api/projects/summary`, web app home pages |
 | FR-18 | Institution profile and email policy: institutional domain for every account; student-only registration with `<firstname>.<YY><branch>@domain`, storing admission year and branch; staff accounts created by the coordinator | `InstitutionProperties`, `EmailPolicy`, `PatternEmailPolicy`, `AuthService.register`, `UserService.createAccount`, `POST /api/users`, `V3__user_institution_profile.sql` |
@@ -67,8 +67,8 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, channels and retries | 141 tests in `backend/src/test/java` (see section 16) |
-| MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | `ProjectControllerWebTest` (13 tests), `UserControllerWebTest` (4 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, channels and retries | 148 tests in `backend/src/test/java` (see section 16) |
+| MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | `ProjectControllerWebTest` (15 tests), `UserControllerWebTest` (4 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
 
@@ -1076,14 +1076,15 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 *record* · `src/main/java/com/prastav/project/ProjectListQuery.java`
 
-**Responsibility.** Filters, ordering and paging for the role-scoped project list. Filters are optional; the list is always paged. A negative page or a size outside 1..50 is rejected with VALIDATION_FAILED instead of being silently corrected.
+**Responsibility.** Filters, ordering and paging for the role-scoped project list. Filters are optional; the list is always paged. A negative page or a size outside 1..50 is rejected with VALIDATION_FAILED instead of being silently corrected. admissionYear and branch narrow the list to the cohort of the project owner; the branch is compared in upper case, as it is stored.
 
-**Components:** `Set<ProjectStatus> statuses, String q, UUID reviewerId, ProjectSort sort, int page, int size`
+**Components:** `Set<ProjectStatus> statuses, String q, UUID reviewerId, Integer admissionYear, String branch, ProjectSort sort, int page, int size`
 
 **Methods:**
 
-- `public ProjectListQuery(...)`: canonical constructor; null statuses become empty, blank `q` becomes null, null sort becomes LATEST; throws `ValidationException` for `page < 0` or `size` outside 1..50
-- `public static ProjectListQuery of(Set<ProjectStatus> statuses, String q, UUID reviewerId, ProjectSort sort, Integer page, Integer size)`: page 0 and size 10 when not given
+- `public ProjectListQuery(...)`: canonical constructor; null statuses become empty, blank `q` and `branch` become null, `branch` is trimmed and upper-cased, null sort becomes LATEST; throws `ValidationException` for `page < 0` or `size` outside 1..50
+- `public static ProjectListQuery of(Set<ProjectStatus> statuses, String q, UUID reviewerId, Integer admissionYear, String branch, ProjectSort sort, Integer page, Integer size)`: page 0 and size 10 when not given
+- `public boolean filtersByCohort()`: true when admissionYear or branch is set, which only the coordinator may do
 - `public Pageable pageable()`
 
 #### `ProjectRepository`
@@ -1131,7 +1132,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public ProjectService(ProjectRepository projectRepository, ProjectStore projectStore, ProjectAccessPolicy accessPolicy, ProposalService proposalService, AllowedActionsResolver allowedActionsResolver, UserService userService, ApplicationEventPublisher events)`
 - `public ProjectView createProject(NewProject newProject, ProposalContent proposal, Actor actor)`
-- `public Page<ProjectListItem> listProjects(Actor actor, ProjectListQuery query)`
+- `public Page<ProjectListItem> listProjects(Actor actor, ProjectListQuery query)`: throws `ForbiddenException` when a non-coordinator passes admissionYear or branch
 - `public ProjectCounts countProjects(Actor actor)`
 - `public ProjectView getProject(UUID projectId, Actor actor)`
 
@@ -1139,13 +1140,14 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 *final class* · `src/main/java/com/prastav/project/ProjectSpecifications.java`
 
-**Responsibility.** Specification pattern: the project list is built from small, composable criteria (role scope, status, reviewer, free-text search) instead of one repository method per combination. Search is case-insensitive over title, description, team members, owner name and reviewer name, with LIKE wildcards escaped.
+**Responsibility.** Specification pattern: the project list is built from small, composable criteria (role scope, status, reviewer, owner cohort, free-text search) instead of one repository method per combination. Search is case-insensitive over title, description, team members, owner name and reviewer name, with LIKE wildcards escaped.
 
 **Methods:**
 
 - `public static Specification<Project> visibleTo(Actor actor)`
 - `public static Specification<Project> statusIn(Set<ProjectStatus> statuses)`
 - `public static Specification<Project> reviewedBy(UUID reviewerId)`
+- `public static Specification<Project> ownerCohort(Integer admissionYear, String branch)`: owner's admission year and branch; a null value leaves that column open
 - `public static Specification<Project> matches(String text)`
 - `public static Specification<Project> forQuery(Actor actor, ProjectListQuery listQuery)`
 
@@ -1240,7 +1242,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public ProjectController(ProjectService projectService, WorkflowService workflowService, ProjectHistoryService projectHistoryService)`
 - `public ProjectDetailResponse create(CreateProjectRequest request, Actor actor)`
-- `public ProjectPageResponse list(List<ProjectStatus> status, String q, UUID reviewerId, ProjectSort sort, Integer page, Integer size, Actor actor)`
+- `public ProjectPageResponse list(List<ProjectStatus> status, String q, UUID reviewerId, Integer admissionYear, String branch, ProjectSort sort, Integer page, Integer size, Actor actor)`
 - `public ProjectCountsResponse summary(Actor actor)`
 - `public ProjectDetailResponse get(UUID id, Actor actor)`
 - `public ProjectDetailResponse submit(UUID id, Actor actor)`
@@ -2069,7 +2071,7 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 | GET | /users?role=FACULTY | COORDINATOR | List users (reviewer picker) | 200 `UserResponse[]` |
 | POST | /users | COORDINATOR | Create a FACULTY or COORDINATOR account | 201 `UserResponse` |
 | POST | /projects | STUDENT | Create project + draft v1 | 201 `ProjectDetailResponse` |
-| GET | /projects?status=&q=&reviewerId=&sort=&page=&size= | any | Role-scoped, paged list with optional filters, search and sort (section 10.7) | 200 `ProjectPageResponse` |
+| GET | /projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size= | any | Role-scoped, paged list with optional filters, search and sort (section 10.7) | 200 `ProjectPageResponse` |
 | GET | /projects/summary | any | Role-scoped counts by status for the dashboards | 200 `ProjectCountsResponse` |
 | GET | /projects/{id} | participant | Detail with `allowedActions` | 200 `ProjectDetailResponse` |
 | PUT | /projects/{id}/proposal | STUDENT owner | Edit open draft | 200 `ProposalVersionResponse` |
@@ -2257,11 +2259,13 @@ returns `ProjectDetailResponse` with `"status": "UNDER_REVIEW"` and `"reviewer":
 | `status` | One or more `ProjectStatus` values, repeated or comma-separated |
 | `q` | Case-insensitive text contained in the title, description, team members, owner name or reviewer name |
 | `reviewerId` | Only projects assigned to this faculty member |
+| `admissionYear` | Coordinator only: projects whose owner's admission year matches, e.g. `2023` |
+| `branch` | Coordinator only: projects whose owner's branch matches, case-insensitive, e.g. `csai` or `CSAI` |
 | `sort` | `LATEST` (default, last update first), `OLDEST`, `TITLE`; ties are broken by id so pages never overlap |
 | `page` | Zero-based page index, default 0 |
 | `size` | Rows per page, 1 to 50, default 10 |
 
-An unknown `status` or `sort`, a malformed `reviewerId`, a non-numeric or negative `page`, or a `size` outside 1 to 50 returns 400 `VALIDATION_FAILED` (for example "size must be between 1 and 50"). `GET /api/projects?status=UNDER_REVIEW&q=crop&page=0&size=10` as the coordinator:
+An unknown `status` or `sort`, a malformed `reviewerId`, a non-numeric or negative `page`, or a `size` outside 1 to 50 returns 400 `VALIDATION_FAILED` (for example "size must be between 1 and 50"); a non-numeric `admissionYear` also returns 400. A student or faculty member passing `admissionYear` or `branch` gets 403 `FORBIDDEN` ("This action requires the COORDINATOR role") rather than having the filter silently ignored. `GET /api/projects?status=UNDER_REVIEW&q=crop&admissionYear=2023&branch=CSAI&page=0&size=10` as the coordinator:
 
 ```json
 {
@@ -2385,9 +2389,9 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `ReviewServiceTest` | strategy lookup per decision; review stored against latest submitted version; stale version 409 before any transition; failed transition stores nothing; non-participant 403 |
 | `ProposalServiceTest` | sequential numbering and prefill; v1 unchanged after v2 edits; one open draft; no revision while UNDER_REVIEW; no edit when SUBMITTED; owner-only edit |
 | `ProposalVersionTest` | immutability; missing-field detection; factory numbering |
-| `ProjectServiceTest` | create in DRAFT with v1 and event; faculty cannot create; list paging, sort and first-submission time; counts per role with zero-filled statuses and awaiting-assignment for the coordinator; stranger 403; latest submitted version in detail |
-| `ProjectListQueryTest` | defaults (page 0, size 10, LATEST), trimming, size bounds 1 and 50 accepted, negative page and size 0 or 51 rejected with `ValidationException`, LIKE wildcard escaping |
-| `ProjectSpecificationsTest` | role scope (student by owner, faculty by reviewer, coordinator everything), empty filters match everything, a student query combines owner scope, status and lower-case search over five columns |
+| `ProjectServiceTest` | create in DRAFT with v1 and event; faculty cannot create; list paging, sort and first-submission time; coordinator batch filter accepted, student or faculty passing admission year or branch 403; counts per role with zero-filled statuses and awaiting-assignment for the coordinator; stranger 403; latest submitted version in detail |
+| `ProjectListQueryTest` | defaults (page 0, size 10, LATEST), trimming, size bounds 1 and 50 accepted, negative page and size 0 or 51 rejected with `ValidationException`, branch trimmed and upper-cased, blank branch is no filter, LIKE wildcard escaping |
+| `ProjectSpecificationsTest` | role scope (student by owner, faculty by reviewer, coordinator everything), empty filters match everything, owner cohort by admission year and branch (a missing value leaves that column open), a student query combines owner scope, status and lower-case search over five columns |
 | `AuditEventListenerTest` | status change becomes an audit row with before/after and JSON details; action mapping |
 | `PatternEmailPolicyTest` | valid student email parsed to year and branch; uppercase input normalized; wrong domain, missing or malformed year or branch rejected; faculty email institutional but not a student email |
 | `InstitutionConfigTest` | the shipped `application.yml` binds `InstitutionProperties` and parses a demo student email |
@@ -2398,7 +2402,7 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `NotificationDispatcherTest` | every enabled channel called in configured order; a throwing channel is retried up to max attempts and does not stop the others; every channel is wrapped in the retry decorator; a channel left out of the configuration is never called; unknown channel name rejected |
 | `NotificationChannelTest` | in-app channel stores through `NotificationService.create`; email channel only logs; the shipped `application.yml` enables `in-app` and `email` with 3 attempts and a 200ms delay |
 | `RetryingNotificationChannelTest` | no retry on success; succeeds on a later attempt; gives up after max attempts and rethrows the last failure; keeps the wrapped name; at least one attempt required |
-| `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding and the page envelope (`content`, `page`, `size`, `totalElements`, `totalPages`); defaults for a call without parameters; 400 `VALIDATION_FAILED` for an unknown status or sort, a malformed reviewer id, a negative or non-numeric page and size 0 or 51; summary body |
+| `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding (including `admissionYear` and `branch`) and the page envelope (`content`, `page`, `size`, `totalElements`, `totalPages`); defaults for a call without parameters; 400 `VALIDATION_FAILED` for an unknown status or sort, a malformed reviewer id, a negative or non-numeric page, a non-numeric admission year and size 0 or 51; 403 for a student batch filter; summary body |
 
 All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed.
 

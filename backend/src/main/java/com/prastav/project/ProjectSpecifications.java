@@ -5,6 +5,7 @@ import com.prastav.auth.User;
 import com.prastav.workflow.ProjectStatus;
 import jakarta.persistence.criteria.Join;
 import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Path;
 import org.springframework.data.jpa.domain.Specification;
 
 import java.util.Locale;
@@ -13,7 +14,7 @@ import java.util.UUID;
 
 /**
  * Specification pattern: the project list is built from small, composable criteria
- * (role scope, status, reviewer, free-text search) instead of one repository method per combination.
+ * (role scope, status, reviewer, owner cohort, free-text search) instead of one repository method per combination.
  */
 public final class ProjectSpecifications {
 
@@ -35,6 +36,16 @@ public final class ProjectSpecifications {
 
     public static Specification<Project> reviewedBy(UUID reviewerId) {
         return (root, query, cb) -> reviewerId == null ? cb.conjunction() : cb.equal(root.get("reviewer").get("id"), reviewerId);
+    }
+
+    /** Owner's admission year and branch (students carry both; staff never own projects). */
+    public static Specification<Project> ownerCohort(Integer admissionYear, String branch) {
+        return (root, query, cb) -> {
+            Path<User> owner = root.get("owner");
+            return cb.and(
+                    admissionYear == null ? cb.conjunction() : cb.equal(owner.get("admissionYear"), admissionYear),
+                    branch == null ? cb.conjunction() : cb.equal(owner.get("branch"), branch));
+        };
     }
 
     /** Case-insensitive match on title, description, team members, owner name or reviewer name. */
@@ -59,6 +70,7 @@ public final class ProjectSpecifications {
         return visibleTo(actor)
                 .and(statusIn(listQuery.statuses()))
                 .and(reviewedBy(listQuery.reviewerId()))
+                .and(ownerCohort(listQuery.admissionYear(), listQuery.branch()))
                 .and(matches(listQuery.q()));
     }
 

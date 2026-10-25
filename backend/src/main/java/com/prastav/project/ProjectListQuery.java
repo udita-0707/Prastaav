@@ -5,18 +5,22 @@ import com.prastav.workflow.ProjectStatus;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
 /**
  * Filters, ordering and paging for the role-scoped project list. Filters are optional; the list is always
  * paged. A negative {@code page} or a {@code size} outside 1..{@value #MAX_SIZE} is rejected with
- * VALIDATION_FAILED instead of being silently corrected.
+ * VALIDATION_FAILED instead of being silently corrected. {@code admissionYear} and {@code branch} narrow the list to
+ * the cohort of the project owner; the branch is compared in upper case, as it is stored.
  */
 public record ProjectListQuery(
         Set<ProjectStatus> statuses,
         String q,
         UUID reviewerId,
+        Integer admissionYear,
+        String branch,
         ProjectSort sort,
         int page,
         int size) {
@@ -27,6 +31,7 @@ public record ProjectListQuery(
     public ProjectListQuery {
         statuses = statuses == null ? Set.of() : Set.copyOf(statuses);
         q = q == null || q.isBlank() ? null : q.trim();
+        branch = branch == null || branch.isBlank() ? null : branch.trim().toUpperCase(Locale.ROOT);
         sort = sort == null ? ProjectSort.LATEST : sort;
         if (page < 0) {
             throw new ValidationException("page must be 0 or greater");
@@ -37,10 +42,15 @@ public record ProjectListQuery(
     }
 
     /** Builds a query from optional request parameters: page 0 and {@value #DEFAULT_SIZE} rows unless given. */
-    public static ProjectListQuery of(Set<ProjectStatus> statuses, String q, UUID reviewerId, ProjectSort sort,
-                                      Integer page, Integer size) {
-        return new ProjectListQuery(statuses, q, reviewerId, sort,
+    public static ProjectListQuery of(Set<ProjectStatus> statuses, String q, UUID reviewerId, Integer admissionYear,
+                                      String branch, ProjectSort sort, Integer page, Integer size) {
+        return new ProjectListQuery(statuses, q, reviewerId, admissionYear, branch, sort,
                 page == null ? 0 : page, size == null ? DEFAULT_SIZE : size);
+    }
+
+    /** True when the query narrows by the owner's admission year or branch, which only the coordinator may do. */
+    public boolean filtersByCohort() {
+        return admissionYear != null || branch != null;
     }
 
     public Pageable pageable() {

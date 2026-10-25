@@ -18,7 +18,7 @@
 - A "Reviews" list shows what waits for your decision, the longest-waiting first.
 
 **Coordinator**
-- See every project with counts by status, search, status and faculty filters, sorting and paging.
+- See every project with counts by status, search, status and faculty filters, a batch filter (admission year and branch of the project owner), sorting and paging.
 - Assign a faculty reviewer to submitted projects from the "Assign Faculty" page, from any list row or from the project page.
 - Follow every review in progress from the "Reviews" list.
 - Create faculty and coordinator accounts on the institutional domain through `POST /api/users`.
@@ -155,7 +155,7 @@ Base path `/api`; every endpoint except register, login and Swagger needs `Autho
 | GET | `/users?role=FACULTY` | coordinator | Faculty list for assignment |
 | POST | `/users` | coordinator | Create a FACULTY or COORDINATOR account on the institutional domain |
 | POST | `/projects` | student | Create a project with draft v1 |
-| GET | `/projects` | any | Role-scoped, paged list; optional `status` (one or more), `q` (case-insensitive search), `reviewerId`, `sort` (`LATEST`, `OLDEST`, `TITLE`), `page` (from 0), `size` (1 to 50, default 10); returns `{ content, page, size, totalElements, totalPages }`, and invalid values give `400 VALIDATION_FAILED` |
+| GET | `/projects` | any | Role-scoped, paged list; optional `status` (one or more), `q` (case-insensitive search), `reviewerId`, `admissionYear` and `branch` (coordinator only, matched on the owner; other roles get `403 FORBIDDEN`), `sort` (`LATEST`, `OLDEST`, `TITLE`), `page` (from 0), `size` (1 to 50, default 10); returns `{ content, page, size, totalElements, totalPages }`, and invalid values give `400 VALIDATION_FAILED` |
 | GET | `/projects/summary` | any | Counts by status for the caller's projects, plus projects awaiting assignment for the coordinator |
 | GET | `/projects/{id}` | participant | Project detail with `allowedActions` |
 | PUT | `/projects/{id}/proposal` | student owner | Edit the open draft |
