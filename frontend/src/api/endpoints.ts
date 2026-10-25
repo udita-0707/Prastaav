@@ -27,7 +27,7 @@ export const listFaculty = () =>
 export const listProjects = ({ status, ...rest }: ProjectListParams = {}) =>
   api
     .get<ProjectPageResponse>('/projects', { params: { ...rest, status: status?.length ? status.join(',') : undefined } })
-    .then((r): ProjectPage => ({ items: r.data.content, total: r.data.totalElements }));
+    .then((r): ProjectPage => ({ items: r.data.content, total: r.data.totalElements, page: r.data.page, size: r.data.size, totalPages: r.data.totalPages }));
 
 export const getProjectCounts = () => api.get<ProjectCountsResponse>('/projects/summary').then((r) => r.data);
 
