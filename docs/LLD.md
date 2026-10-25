@@ -67,7 +67,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service and channels | 135 tests in `backend/src/test/java` (see section 16) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, channels and retries | 141 tests in `backend/src/test/java` (see section 16) |
 | MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | `ProjectControllerWebTest` (13 tests), `UserControllerWebTest` (4 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
@@ -146,7 +146,7 @@ com.prastav
 │              AuditEventListener, AuditQueryService
 └─ notification Notification, NotificationType, NotificationRepository, NotificationService,
                NotificationChannel, InAppNotificationChannel, EmailNotificationChannel,
-               NotificationDispatcher, NotificationProperties
+               NotificationDispatcher, NotificationProperties, RetryingNotificationChannel
    └─ web      NotificationResponse, NotificationMapper
 ```
 
@@ -253,7 +253,7 @@ Because step 4 runs before step 5 inside one transaction, a failed transition ne
 
 ## 8. Class catalogue
 
-Generated from `backend/src/main/java` (121 classes). Private helper methods are omitted; private fields are listed.
+Generated from `backend/src/main/java` (122 classes). Private helper methods are omitted; private fields are listed.
 
 ### 8.1 Package `com.prastav`
 
@@ -1771,7 +1771,9 @@ Generated from `backend/src/main/java` (121 classes). Private helper methods are
 
 ### 8.13 Package `com.prastav.notification`
 
-**Delivery (Strategy).** A notification is delivered through `NotificationDispatcher.dispatch(Notification)`. Each delivery route is a `NotificationChannel` strategy: `InAppNotificationChannel` stores it through `NotificationService.create`, and `EmailNotificationChannel` writes the email to the log without sending anything. `prastav.notification.enabled-channels` (`NOTIFICATION_CHANNELS`, default `in-app,email`) lists the channels in the order they run. The dispatcher catches and logs a `RuntimeException` from any channel and moves on to the next one, so a failing email route never loses the in-app notification. A name in the list with no matching channel bean stops the application at startup.
+**Delivery (Strategy).** A notification is delivered through `NotificationDispatcher.dispatch(Notification)`. Each delivery route is a `NotificationChannel` strategy: `InAppNotificationChannel` stores it through `NotificationService.create`, and `EmailNotificationChannel` writes the email to the log without sending anything. `prastav.notification.enabled-channels` (`NOTIFICATION_CHANNELS`, default `in-app,email`) lists the channels in the order they run.
+
+**Retries (Decorator).** The dispatcher wraps every enabled channel in a `RetryingNotificationChannel`. A failed delivery is tried again up to `prastav.notification.retry.max-attempts` times in total (`NOTIFICATION_RETRY_MAX_ATTEMPTS`, default 3), with `prastav.notification.retry.delay` between attempts (`NOTIFICATION_RETRY_DELAY`, default 200ms). When every attempt fails, the decorator rethrows the last exception; it does not log the final failure itself. The dispatcher catches that `RuntimeException`, logs it at WARN and moves on to the next channel, so a failing email route never loses the in-app notification. A name in the list with no matching channel bean stops the application at startup.
 
 ![Notification channels](uml/png/12_events_and_strategies.png)
 
@@ -1847,20 +1849,22 @@ Generated from `backend/src/main/java` (121 classes). Private helper methods are
 
 | Field | Type | Visibility |
 |---|---|---|
-| `enabledChannels` | `List<NotificationChannel>` | private |
+| `enabledChannels` | `List<NotificationChannel>` (each a `RetryingNotificationChannel`) | private |
 
 **Methods:**
 
-- `public NotificationDispatcher(List<NotificationChannel> channels, NotificationProperties properties)`: resolves the configured names to channels; IllegalStateException for an unknown name
-- `public void dispatch(Notification notification)`: calls `deliver` on each enabled channel; a RuntimeException is logged at WARN and the next channel runs
+- `public NotificationDispatcher(List<NotificationChannel> channels, NotificationProperties properties)`: resolves the configured names to channels and wraps each in a RetryingNotificationChannel; IllegalStateException for an unknown name
+- `public void dispatch(Notification notification)`: calls `deliver` on each enabled channel; a RuntimeException left after the retries is logged at WARN and the next channel runs
 
 #### `NotificationProperties`
 
 *record* · @ConfigurationProperties(prefix = "prastav.notification") · @Validated · `src/main/java/com/prastav/notification/NotificationProperties.java`
 
-**Responsibility.** Notification delivery settings bound from `prastav.notification` in application.yml: the names of the channels every notification is sent through.
+**Responsibility.** Notification delivery settings bound from `prastav.notification` in application.yml: the names of the channels every notification is sent through, and how often each channel is retried.
 
-**Components:** `@NotNull List<String> enabledChannels`
+**Components:** `@NotNull List<String> enabledChannels, @NotNull @Valid Retry retry`
+
+Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull Duration delay` (attempts including the first one, and the pause between two attempts).
 
 #### `NotificationRepository`
 
@@ -1893,6 +1897,24 @@ Generated from `backend/src/main/java` (121 classes). Private helper methods are
 - `public long unreadCount(Actor actor)`
 - `public Notification markRead(UUID notificationId, Actor actor)`: 404 NOT_FOUND for an unknown id, 403 FORBIDDEN for another user's notification
 - `public int markAllRead(Actor actor)`: returns the number of notifications changed
+
+#### `RetryingNotificationChannel`
+
+*class* `implements NotificationChannel` · `src/main/java/com/prastav/notification/RetryingNotificationChannel.java`
+
+**Responsibility.** Decorator pattern: wraps any NotificationChannel and retries a failed delivery up to maxAttempts times in total, pausing delay between attempts. Retrying is added around a channel without changing it, and every channel gets the same behaviour. When the last attempt fails the last exception is rethrown, so NotificationDispatcher logs the failure in one place and moves on.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `delegate` | `NotificationChannel` | private |
+| `maxAttempts` | `int` | private |
+| `delay` | `Duration` | private |
+
+**Methods:**
+
+- `public RetryingNotificationChannel(NotificationChannel delegate, int maxAttempts, Duration delay)`: IllegalArgumentException when maxAttempts is below 1
+- `public String name()`: the wrapped channel's name
+- `public void deliver(Notification notification)`: returns on the first successful attempt; logs each failed attempt that will be retried at INFO; rethrows the last exception after maxAttempts failures; an interrupt during the pause stops retrying and rethrows
 
 #### `NotificationType`
 
@@ -2304,6 +2326,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | Facade | `WorkflowService` | One simple API over states, persistence and events; every transition takes the same audited path |
 | Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener` | Side effects decoupled from the workflow |
 | Strategy | `ReviewDecisionHandler` + `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`; `EmailPolicy` + `PatternEmailPolicy` (institution email rules, swappable per institution); `NotificationChannel` + `InAppNotificationChannel`, `EmailNotificationChannel` chosen by `NotificationDispatcher` from configuration | Add a decision, an email rule or a delivery channel by adding a class |
+| Decorator | `RetryingNotificationChannel` wrapping every `NotificationChannel` enabled in `NotificationDispatcher` | Retry is added around any channel without changing the channel or the dispatcher, and every channel is retried the same way |
 | Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects` | One composable query for every list filter instead of a repository method per combination |
 | Repository | `UserRepository`, `ProjectRepository`, `ProposalVersionRepository`, `ReviewRepository`, `AuditLogRepository`, `NotificationRepository` | Persistence abstraction (Spring Data JPA) |
 | Builder | `AuditLog.builder()` / `AuditLog.Builder` | Readable construction with optional fields |
@@ -2372,8 +2395,9 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `UserServiceTest` | coordinator creates FACULTY and COORDINATOR without the student pattern; other callers 403; STUDENT, other domain and duplicate email rejected |
 | `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400 |
 | `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project |
-| `NotificationDispatcherTest` | every enabled channel called in configured order; a throwing channel does not stop the others; a channel left out of the configuration is never called; unknown channel name rejected |
-| `NotificationChannelTest` | in-app channel stores through `NotificationService.create`; email channel only logs; the shipped `application.yml` enables `in-app` and `email` |
+| `NotificationDispatcherTest` | every enabled channel called in configured order; a throwing channel is retried up to max attempts and does not stop the others; every channel is wrapped in the retry decorator; a channel left out of the configuration is never called; unknown channel name rejected |
+| `NotificationChannelTest` | in-app channel stores through `NotificationService.create`; email channel only logs; the shipped `application.yml` enables `in-app` and `email` with 3 attempts and a 200ms delay |
+| `RetryingNotificationChannelTest` | no retry on success; succeeds on a later attempt; gives up after max attempts and rethrows the last failure; keeps the wrapped name; at least one attempt required |
 | `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding and the page envelope (`content`, `page`, `size`, `totalElements`, `totalPages`); defaults for a call without parameters; 400 `VALIDATION_FAILED` for an unknown status or sort, a malformed reviewer id, a negative or non-numeric page and size 0 or 51; summary body |
 
 All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed.
@@ -2394,7 +2418,7 @@ PlantUML sources are in `docs/uml/*.puml` (shared style `_style.iuml`), rendered
 | Sequence: illegal transition rejected | `08_seq_illegal_transition` |
 | ER diagram | `10_er` |
 | Component / architecture | `11_component_architecture` |
-| Observer and Strategy (events, review decisions, email policy, notification channels) | `12_events_and_strategies` |
+| Observer, Strategy and Decorator (events, review decisions, email policy, notification channels and retries) | `12_events_and_strategies` |
 
 ### Use cases
 

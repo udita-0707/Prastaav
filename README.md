@@ -84,6 +84,8 @@ Rules:
 | `SEED_DEMO_DATA` | `true` | create the demo users on an empty database |
 | `DEMO_PASSWORD` | `Password@123` | shared password of every demo account |
 | `NOTIFICATION_CHANNELS` | `in-app,email` | channels every notification is sent through, in order; `email` only writes to the log |
+| `NOTIFICATION_RETRY_MAX_ATTEMPTS` | `3` | delivery attempts per channel, including the first |
+| `NOTIFICATION_RETRY_DELAY` | `200ms` | pause between two attempts |
 
 ### Frontend
 
@@ -174,7 +176,7 @@ backend/src/main/java/com/prastav/
   proposal/   immutable versions, factory, draft editing  (+ web/)
   review/     review decisions as strategies               (+ web/)
   audit/      append-only audit log fed by domain events
-  notification/ notifications: entity, per-user inbox queries, read flags, delivery channels and dispatcher (+ web/ DTO and mapper)
+  notification/ notifications: entity, per-user inbox queries, read flags, delivery channels, retry decorator and dispatcher (+ web/ DTO and mapper)
 backend/src/main/resources/db/migration/   Flyway migrations
 frontend/
   public/brand/          logo, logo mark, favicon
@@ -210,7 +212,7 @@ cd frontend && npm run typecheck           # TypeScript type check
 cd frontend && npm run build               # type check and production build
 ```
 
-Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery` (paging defaults and bounds), `ProjectSpecifications` (role scope and filters), the audit listener, `PatternEmailPolicy` (with the shipped configuration), registration in `AuthService`, account creation in `UserService` and `NotificationService` (inbox scoping, unread count, read ownership), `NotificationDispatcher` (enabled channels in order, a failing channel does not stop the others, disabled channels skipped) and the in-app and email channels. `UserControllerWebTest` checks the coordinator-only `POST /api/users`. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters, the page envelope, invalid list parameters and the summary endpoint.
+Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery` (paging defaults and bounds), `ProjectSpecifications` (role scope and filters), the audit listener, `PatternEmailPolicy` (with the shipped configuration), registration in `AuthService`, account creation in `UserService` and `NotificationService` (inbox scoping, unread count, read ownership), `NotificationDispatcher` (enabled channels in order, a failing channel does not stop the others, disabled channels skipped), `RetryingNotificationChannel` (no retry on success, success on a later attempt, gives up after max attempts) and the in-app and email channels. `UserControllerWebTest` checks the coordinator-only `POST /api/users`. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters, the page envelope, invalid list parameters and the summary endpoint.
 
 ## Design patterns
 
@@ -221,6 +223,7 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 | Facade | `WorkflowService` |
 | Observer | domain events consumed by `AuditEventListener` |
 | Strategy | `ReviewDecisionHandler` and its three decision handlers; `EmailPolicy` with `PatternEmailPolicy` for account emails; `NotificationChannel` with `InAppNotificationChannel` and `EmailNotificationChannel`, run by `NotificationDispatcher` |
+| Decorator | `RetryingNotificationChannel` retries every enabled notification channel |
 | Specification | `ProjectSpecifications` for the filtered project list |
 | Repository | Spring Data repositories per module |
 | Builder | `AuditLog.Builder` |

@@ -1,6 +1,6 @@
 @startuml 12_events_and_strategies
 !include _style.iuml
-title Prastav - Observer (domain events) and Strategy (review decisions, email policy, notification channels)
+title Prastav - Observer (domain events), Strategy (review decisions, email policy, notification channels) and Decorator (retries)
 hide empty members
 
 package "Observer: events" {
@@ -70,7 +70,7 @@ package "Strategy: institution email policy" {
   UserService --> EmailPolicy : requireInstitutional()
 }
 
-package "Strategy: notification channels" {
+package "Strategy and Decorator: notification channels" {
   interface NotificationChannel {
     + name() : String
     + deliver(notification : Notification)
@@ -81,6 +81,13 @@ package "Strategy: notification channels" {
   class EmailNotificationChannel
   NotificationChannel <|.. InAppNotificationChannel
   NotificationChannel <|.. EmailNotificationChannel
+  class RetryingNotificationChannel <<Decorator>> {
+    - delegate : NotificationChannel
+    - maxAttempts : int
+    - delay : Duration
+  }
+  NotificationChannel <|.. RetryingNotificationChannel
+  RetryingNotificationChannel o--> "1" NotificationChannel : delegate
 
   class NotificationDispatcher {
     - enabledChannels : List<NotificationChannel>
@@ -88,9 +95,10 @@ package "Strategy: notification channels" {
   }
   class NotificationProperties <<record>> {
     + enabledChannels() : List<String>
+    + retry() : Retry
   }
-  NotificationDispatcher o--> NotificationChannel
-  NotificationDispatcher ..> NotificationProperties : enabled-channels
+  NotificationDispatcher o--> RetryingNotificationChannel : wraps each enabled channel
+  NotificationDispatcher ..> NotificationProperties : enabled-channels, retry
   class NotificationService {
     + create(recipient, project, type, message) : Notification
   }
