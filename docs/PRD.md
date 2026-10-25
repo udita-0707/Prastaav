@@ -48,7 +48,7 @@ Product decisions: one assigned faculty reviewer per project; a REJECTED project
 | FR-9 | Invalid transitions rejected with clear error (e.g. approve a DRAFT) |
 | FR-10 | Every state change, assignment, submission and review recorded in audit log (who, what, when, before/after) |
 | FR-11 | Project timeline view (all versions, reviews, status changes in order) |
-| FR-12 | Role-scoped project lists with status filter, case-insensitive search and pagination (page from 0, size 1 to 50, default 10); filtering and paging run in the database; invalid parameters are rejected with `VALIDATION_FAILED` |
+| FR-12 | Role-scoped project lists with status filter, case-insensitive search, a coordinator-only batch filter (owner's admission year and branch; other roles passing it get `FORBIDDEN`) and pagination (page from 0, size 1 to 50, default 10); filtering and paging run in the database; invalid parameters are rejected with `VALIDATION_FAILED` |
 | FR-13 | In-app notifications on assignment, review decision, resubmission, delivered through the configured channels (in-app inbox; email written to the log), each retried a configured number of times |
 | FR-14 | Compare two proposal versions (field-level diff) |
 | FR-15 | Coordinator dashboard: counts by status, pending-assignment list, reviewer workload |
@@ -219,7 +219,7 @@ Base path `/api`. All except auth require `Authorization: Bearer <jwt>`.
 | GET | /users?role=FACULTY | COORDINATOR | List faculty for assignment |
 | POST | /users | COORDINATOR | Create a FACULTY or COORDINATOR account on the institutional domain (FR-18) |
 | POST | /projects | STUDENT | Create project + draft v1 |
-| GET | /projects?status=&q=&reviewerId=&sort=&page=&size= | any | Role-scoped list with status filter, search, sort and paging; returns `{ content, page, size, totalElements, totalPages }` |
+| GET | /projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size= | any | Role-scoped list with status filter, search, batch filter (coordinator only), sort and paging; returns `{ content, page, size, totalElements, totalPages }` |
 | GET | /projects/summary | any | Role-scoped counts by status; projects awaiting assignment for the coordinator |
 | GET | /projects/{id} | owner/reviewer/coordinator | Project detail + current status |
 | PUT | /projects/{id}/proposal | STUDENT (owner) | Edit current draft version |
