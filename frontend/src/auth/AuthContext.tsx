@@ -1,12 +1,12 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { loadSession, saveSession } from '../api/client';
 import * as endpoints from '../api/endpoints';
-import type { Role, UserResponse } from '../api/types';
+import type { UserResponse } from '../api/types';
 
 interface AuthState {
   user: UserResponse | null;
   login: (email: string, password: string, remember?: boolean) => Promise<void>;
-  register: (name: string, email: string, password: string, role: Role) => Promise<void>;
+  register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -21,8 +21,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(session.user);
   }, []);
 
-  const register = useCallback(async (name: string, email: string, password: string, role: Role) => {
-    const session = await endpoints.register(name, email, password, role);
+  const register = useCallback(async (name: string, email: string, password: string) => {
+    const session = await endpoints.register(name, email, password);
     saveSession(session);
     setUser(session.user);
   }, []);

@@ -72,18 +72,19 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-15 | Coordinator dashboard | — | Implemented as role dashboards: counts per status and projects awaiting assignment | `ProjectService.countProjects`, `GET /api/projects/summary`, web app home pages |
 | FR-16 | Audit-log viewer with filters | M2 | [M2 Planned] | `AuditController`, `AuditLogFilter`, `AuditLogResponse` |
 | FR-17 | Reassign reviewer with audit entry | M2 | [M2 Planned] | `WorkflowService.reassignReviewer`, `UnderReviewState.reassignReviewer` |
+| FR-18 | Institution profile and email policy: institutional domain for every account; student-only registration with `<firstname>.<YY><branch>@domain`, storing admission year and branch; staff accounts created by the coordinator | — | Implemented | `InstitutionProperties`, `EmailPolicy`, `PatternEmailPolicy`, `AuthService.register`, `UserService.createAccount`, `POST /api/users`, `V3__user_institution_profile.sql` |
 
 ### 2.2 Engineering items
 
 | Item | Status | Evidence |
 |---|---|---|
-| Flyway schema with constraints and triggers | [M1 Implemented] | `backend/src/main/resources/db/migration/V1__init.sql` |
-| Seed data (1 coordinator, 2 faculty, 3 students) | [M1 Implemented] | `DemoDataSeeder` |
+| Flyway schema with constraints and triggers | Implemented | `backend/src/main/resources/db/migration/V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql` |
+| Seed data (1 coordinator, 2 faculty, 3 students on `nst.rishihood.edu.in`, one shared `prastav.seed.demo-password`) | Implemented | `DemoDataSeeder` |
 | Optimistic locking on `Project` | [M1 Implemented] | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | [M1 Implemented] | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | [M1 Implemented] | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, notification service | Implemented | 84 tests in `backend/src/test/java` (see section 16) |
-| MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints) | Implemented | `ProjectControllerWebTest` (6 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service | Implemented | 114 tests in `backend/src/test/java` (see section 16) |
+| MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | Implemented | `ProjectControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests) |
 | React UI for three roles | [M1 Implemented] | `frontend/src` |
 | PostgreSQL via docker-compose | [M1 Implemented] | `docker-compose.yml` (database only) |
 | Backend/frontend Dockerfiles, compose for whole stack | [M2 Planned] | section 15.3 |
@@ -138,8 +139,10 @@ com.prastav
 ├─ auth        Role, User, Actor, AuthResult, UserRepository, UserService, AuthService,
 │              JwtService, JwtAuthenticationFilter, RestAuthErrorHandler, SecurityConfig,
 │              DemoDataSeeder                                                                 [M1]
+│              InstitutionProperties, EmailPolicy, PatternEmailPolicy, StudentEmail
 │  └─ web      AuthController, UserController, RegisterRequest, LoginRequest, AuthResponse,
 │              UserResponse, UserSummary, UserMapper                                          [M1]
+│              CreateUserRequest
 ├─ workflow    ProjectStatus, Action, ProjectState, DraftState, SubmittedState,
 │              UnderReviewState, RevisionRequestedState, ApprovedState, RejectedState,
 │              ProjectStateFactory, Guards, AllowedActionsResolver, IllegalTransitionException,
@@ -469,36 +472,60 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 *class* · @Service · `src/main/java/com/prastav/auth/AuthService.java`
 
-**Responsibility.** Registration and login. Passwords are hashed with BCrypt; a successful call returns a JWT.
+**Responsibility.** Registration and login. Passwords are hashed with BCrypt; a successful call returns a JWT. Self-registration is for students only, with an email accepted by the EmailPolicy.
 
 | Field | Type | Visibility |
 |---|---|---|
 | `userRepository` | `UserRepository` | private |
 | `passwordEncoder` | `PasswordEncoder` | private |
 | `jwtService` | `JwtService` | private |
+| `emailPolicy` | `EmailPolicy` | private |
 
 **Methods:**
 
-- `public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService)`
-- `public AuthResult register(String name, String email, String password, Role role)`
+- `public AuthService(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService, EmailPolicy emailPolicy)`
+- `public AuthResult register(String name, String email, String password, Role role)`: `role` may be null; anything but STUDENT is rejected; the email must pass `EmailPolicy.requireStudent`
 - `public AuthResult login(String email, String password)`
 
 #### `DemoDataSeeder` [M1 Implemented]
 
 *class* `implements ApplicationRunner` · @Component · `src/main/java/com/prastav/auth/DemoDataSeeder.java`
 
-**Responsibility.** Creates the demo accounts (1 coordinator, 2 faculty, 3 students) on an empty database. Done in Java rather than SQL so that passwords are hashed with the same BCrypt encoder the app uses.
+**Responsibility.** Creates the demo accounts (1 coordinator, 2 faculty, 3 students) on an empty database, all on the institutional domain and sharing prastav.seed.demo-password. Student admission year and branch are parsed by the EmailPolicy, exactly as at registration. Done in Java rather than SQL so that passwords are hashed with the same BCrypt encoder the app uses.
 
 | Field | Type | Visibility |
 |---|---|---|
 | `log` | `static Logger` | private |
 | `userRepository` | `UserRepository` | private |
 | `passwordEncoder` | `PasswordEncoder` | private |
+| `emailPolicy` | `EmailPolicy` | private |
+| `emailDomain` | `String` | private |
+| `demoPassword` | `String` | private |
 
 **Methods:**
 
-- `public DemoDataSeeder(UserRepository userRepository, PasswordEncoder passwordEncoder)`
+- `public DemoDataSeeder(UserRepository userRepository, PasswordEncoder passwordEncoder, EmailPolicy emailPolicy, InstitutionProperties institution, @Value("${prastav.seed.demo-password}") String demoPassword)`
 - `public void run(ApplicationArguments args)`
+- `private String email(String localPart)`
+
+#### `EmailPolicy`
+
+*interface* · `src/main/java/com/prastav/auth/EmailPolicy.java`
+
+**Responsibility.** Strategy pattern: the rules an email address must satisfy before an account is opened with it. AuthService, UserService and the seed depend only on this interface, so a different institutional naming scheme is a new implementation rather than an edit to the services. Both methods throw ValidationException when the email is not acceptable.
+
+**Methods:**
+
+- `String requireInstitutional(String email)`: the trimmed, lower-case email if it is on the institution's domain
+- `StudentEmail requireStudent(String email)`: the normalized email with admission year and branch parsed from it
+
+#### `InstitutionProperties`
+
+*record* · @ConfigurationProperties(prefix = "prastav.institution") · `src/main/java/com/prastav/auth/InstitutionProperties.java`
+
+**Responsibility.** Institution profile bound from prastav.institution in application.yml: the institution name, the only email domain accepted for accounts, and the regular expression a student email's local part must match. The expression declares the named groups year (two digits) and branch.
+
+**Components:** `String name, String emailDomain, String studentEmailPattern` (all `@NotBlank`)
 
 #### `JwtAuthenticationFilter` [M1 Implemented]
 
@@ -534,6 +561,25 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 - `public JwtService(@Value("$`
 - `public String generateToken(User user)`
 - `public Optional<Actor> parse(String token)`
+
+#### `PatternEmailPolicy`
+
+*class* `implements EmailPolicy` · @Component · `src/main/java/com/prastav/auth/PatternEmailPolicy.java`
+
+**Responsibility.** Strategy pattern: the EmailPolicy driven by InstitutionProperties. Any address on the configured domain is institutional; a student address must also match the configured local-part pattern, e.g. aarav.23csai@nst.rishihood.edu.in gives admission year 2023 and branch CSAI. Input is matched case-insensitively and returned lower-case.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `CENTURY` | `static int` | private |
+| `institution` | `InstitutionProperties` | private |
+| `domainSuffix` | `String` | private |
+| `studentLocalPart` | `Pattern` | private |
+
+**Methods:**
+
+- `public PatternEmailPolicy(InstitutionProperties institution)`
+- `public String requireInstitutional(String email)`
+- `public StudentEmail requireStudent(String email)`
 
 #### `RestAuthErrorHandler` [M1 Implemented]
 
@@ -578,11 +624,19 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 - `public CorsConfigurationSource corsConfigurationSource()`
 - `public PasswordEncoder passwordEncoder()`
 
+#### `StudentEmail`
+
+*record* · `src/main/java/com/prastav/auth/StudentEmail.java`
+
+**Responsibility.** A normalized student email and the admission year and branch encoded in it.
+
+**Components:** `String email, int admissionYear, String branch`
+
 #### `User` [M1 Implemented]
 
 *class* `extends BaseEntity` · @Entity · `src/main/java/com/prastav/auth/User.java`
 
-**Responsibility.** A person who can log in. The role is fixed on the account and copied into the JWT.
+**Responsibility.** A person who can log in. The role is fixed on the account and copied into the JWT. Students also carry the admission year and branch parsed from their institutional email.
 
 | Field | Type | Visibility |
 |---|---|---|
@@ -590,16 +644,21 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 | `email` | `String` | private |
 | `passwordHash` | `String` | private |
 | `role` | `Role` | private |
+| `admissionYear` | `Integer` (nullable) | private |
+| `branch` | `String` (nullable) | private |
 
 **Methods:**
 
 - `protected User()`
 - `public User(String name, String email, String passwordHash, Role role)`
+- `public static User student(String name, StudentEmail studentEmail, String passwordHash)`
 - `public Actor toActor()`
 - `public String getName()`
 - `public String getEmail()`
 - `public String getPasswordHash()`
 - `public Role getRole()`
+- `public Integer getAdmissionYear()`
+- `public String getBranch()`
 
 #### `UserRepository` [M1 Implemented]
 
@@ -618,18 +677,21 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 *class* · @Service · `src/main/java/com/prastav/auth/UserService.java`
 
-**Responsibility.** The auth module's public service for other modules. Other modules never touch UserRepository directly; they ask this service.
+**Responsibility.** The auth module's public service for other modules. Other modules never touch UserRepository directly; they ask this service. It also creates the FACULTY and COORDINATOR accounts, which only the coordinator may do.
 
 | Field | Type | Visibility |
 |---|---|---|
 | `userRepository` | `UserRepository` | private |
+| `passwordEncoder` | `PasswordEncoder` | private |
+| `emailPolicy` | `EmailPolicy` | private |
 
 **Methods:**
 
-- `public UserService(UserRepository userRepository)`
+- `public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, EmailPolicy emailPolicy)`
 - `public User getById(UUID id)`
 - `public List<User> listByRole(Role role)`
 - `public Map<UUID, String> namesOf(Collection<UUID> ids)`
+- `public User createAccount(Actor actor, String name, String email, String password, Role role)`: coordinator only (403 otherwise); STUDENT rejected (400); email must pass `EmailPolicy.requireInstitutional`; duplicate email 400
 
 
 ### 8.4 Package `com.prastav.auth.web`
@@ -660,6 +722,14 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 **Components:** `String token, UserResponse user`
 
+#### `CreateUserRequest`
+
+*record* · `src/main/java/com/prastav/auth/web/CreateUserRequest.java`
+
+**Responsibility.** Body of POST /api/users. FACULTY or COORDINATOR; STUDENT is rejected by the service.
+
+**Components:** `String name, String email, String password, Role role` (`@NotBlank`/`@Size` as `RegisterRequest`, `@NotNull` role)
+
 #### `LoginRequest` [M1 Implemented]
 
 *record* · `src/main/java/com/prastav/auth/web/LoginRequest.java`
@@ -672,7 +742,7 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 *record* · `src/main/java/com/prastav/auth/web/RegisterRequest.java`
 
-**Responsibility.** Body of POST /api/auth/register. COORDINATOR is rejected by the service.
+**Responsibility.** Body of POST /api/auth/register. role is optional; anything but STUDENT is rejected by the service.
 
 **Components:** `String name, String email, String password, Role role`
 
@@ -680,7 +750,7 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 *class* · @RestController · `src/main/java/com/prastav/auth/web/UserController.java`
 
-**Responsibility.** Lets the coordinator list users, e.g. ?role=FACULTY to pick a reviewer.
+**Responsibility.** Lets the coordinator list users, e.g. ?role=FACULTY to pick a reviewer, and create FACULTY and COORDINATOR accounts. HTTP only; the rules are in UserService.
 
 | Field | Type | Visibility |
 |---|---|---|
@@ -690,6 +760,7 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 - `public UserController(UserService userService)`
 - `public List<UserResponse> list(Role role)`
+- `public UserResponse create(Actor actor, CreateUserRequest request)`
 
 #### `UserMapper` [M1 Implemented]
 
@@ -707,9 +778,9 @@ Generated from `backend/src/main/java` (96 classes). Private helper methods are 
 
 *record* · `src/main/java/com/prastav/auth/web/UserResponse.java`
 
-**Responsibility.** Public view of a user; never contains the password hash.
+**Responsibility.** Public view of a user; never contains the password hash. Admission year and branch are set for students only.
 
-**Components:** `UUID id, String name, String email, Role role`
+**Components:** `UUID id, String name, String email, Role role, Integer admissionYear, String branch`
 
 #### `UserSummary` [M1 Implemented]
 
@@ -1847,7 +1918,7 @@ None of the following exists in the M1 code.
 
 ## 9. Database schema
 
-Owned by Flyway. M1 ships `V1__init.sql`; Hibernate runs with `ddl-auto: none`. All ids are application-generated UUIDs; all timestamps are `TIMESTAMPTZ` stored in UTC.
+Owned by Flyway (`V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`); Hibernate runs with `ddl-auto: none`. All ids are application-generated UUIDs; all timestamps are `TIMESTAMPTZ` stored in UTC.
 
 ![ER diagram](uml/png/10_er.png)
 
@@ -1860,7 +1931,11 @@ Owned by Flyway. M1 ships `V1__init.sql`; Hibernate runs with `ddl-auto: none`. 
 | email | VARCHAR(255) | NOT NULL, UNIQUE (stored lower-case) |
 | password_hash | VARCHAR(100) | NOT NULL (BCrypt) |
 | role | VARCHAR(20) | NOT NULL, CHECK in (STUDENT, FACULTY, COORDINATOR) |
+| admission_year | INTEGER | nullable; 2000 + YY from a student email |
+| branch | VARCHAR(20) | nullable; upper-case branch from a student email, e.g. CSAI |
 | created_at | TIMESTAMPTZ | NOT NULL |
+
+Index `idx_users_admission_year_branch` on (admission_year, branch) for cohort filters. Staff rows leave both columns null.
 
 ### 9.2 `projects` [M1 Implemented]
 
@@ -1941,10 +2016,11 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 
 | Method | Path | Role | Purpose | Success | Tag |
 |---|---|---|---|---|---|
-| POST | /auth/register | public | Register STUDENT or FACULTY | 201 `AuthResponse` | [M1 Implemented] |
+| POST | /auth/register | public | Register a STUDENT with an institutional student email | 201 `AuthResponse` | Implemented |
 | POST | /auth/login | public | Log in | 200 `AuthResponse` | [M1 Implemented] |
 | GET | /auth/me | any | Current user | 200 `UserResponse` | [M1 Implemented] |
 | GET | /users?role=FACULTY | COORDINATOR | List users (reviewer picker) | 200 `UserResponse[]` | [M1 Implemented] |
+| POST | /users | COORDINATOR | Create a FACULTY or COORDINATOR account | 201 `UserResponse` | Implemented |
 | POST | /projects | STUDENT | Create project + draft v1 | 201 `ProjectDetailResponse` | [M1 Implemented] |
 | GET | /projects?status=&q=&reviewerId=&sort=&page=&size= | any | Role-scoped list with optional filters, search, sort and paging (section 10.7) | 200 `ProjectSummaryResponse[]`, `X-Total-Count` header | Implemented |
 | GET | /projects/summary | any | Role-scoped counts by status for the dashboards | 200 `ProjectCountsResponse` | Implemented |
@@ -1970,7 +2046,7 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 `POST /api/auth/register`
 
 ```json
-{ "name": "Aarav Mehta", "email": "aarav@prastav.edu", "password": "Password@123", "role": "STUDENT" }
+{ "name": "Aarav Mehta", "email": "aarav.23csai@nst.rishihood.edu.in", "password": "Password@123" }
 ```
 
 `201 Created` (login returns the same shape with 200):
@@ -1978,11 +2054,20 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 ```json
 {
   "token": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI3ZjFjLi4uIiwidXNlcklkIjoiN2YxYy4uLiIsInJvbGUiOiJTVFVERU5UIn0.sig",
-  "user": { "id": "7f1c2a9e-3b0d-4c1e-9a55-1d2e3f4a5b6c", "name": "Aarav Mehta", "email": "aarav@prastav.edu", "role": "STUDENT" }
+  "user": { "id": "7f1c2a9e-3b0d-4c1e-9a55-1d2e3f4a5b6c", "name": "Aarav Mehta", "email": "aarav.23csai@nst.rishihood.edu.in",
+            "role": "STUDENT", "admissionYear": 2023, "branch": "CSAI" }
 }
 ```
 
-Rules: `role` COORDINATOR returns 400 VALIDATION_FAILED; a duplicate email returns 400; wrong credentials on login return 401 UNAUTHENTICATED with "Invalid email or password".
+Rules: `role` is optional and only STUDENT is accepted; the email must be on `prastav.institution.email-domain` and match `prastav.institution.student-email-pattern` (`<firstname>.<YY><branch>`), compared case-insensitively and stored lower-case. A faculty-style email, another domain, another role or a duplicate email returns 400 VALIDATION_FAILED; wrong credentials on login return 401 UNAUTHENTICATED with "Invalid email or password".
+
+`POST /api/users` (COORDINATOR)
+
+```json
+{ "name": "Dr. Kavya Menon", "email": "kavya.menon@nst.rishihood.edu.in", "password": "Password@123", "role": "FACULTY" }
+```
+
+`201 Created` with `UserResponse` (`admissionYear` and `branch` null). Only the institutional domain is checked, not the student pattern. STUDENT, another domain or a duplicate email returns 400 VALIDATION_FAILED; any other caller role returns 403 FORBIDDEN.
 
 ### 10.2 Create project [M1 Implemented]
 
@@ -2174,7 +2259,7 @@ The `X-Total-Count` response header always carries the number of matches across 
 
 | Code | HTTP | Raised by | Example |
 |---|---|---|---|
-| VALIDATION_FAILED | 400 | `@Valid` failures (with `fieldErrors`), malformed JSON or UUID, `ValidationException` (incomplete proposal, missing review comments, non-faculty assignee, coordinator self-registration, duplicate email) | `fieldErrors: [{ "field": "title", "message": "must not be blank" }]` |
+| VALIDATION_FAILED | 400 | `@Valid` failures (with `fieldErrors`), malformed JSON or UUID, `ValidationException` (incomplete proposal, missing review comments, non-faculty assignee, non-student registration, email outside the institutional domain or student pattern, duplicate email) | `fieldErrors: [{ "field": "title", "message": "must not be blank" }]` |
 | UNAUTHENTICATED | 401 | `RestAuthErrorHandler.commence` (no/invalid/expired token), `UnauthenticatedException` (bad login) | "Authentication required: send a valid Bearer token" |
 | FORBIDDEN | 403 | `@PreAuthorize` denial, `ForbiddenException` from `ProjectAccessPolicy` or `Guards` | "Only the assigned reviewer can review this project" |
 | NOT_FOUND | 404 | `NotFoundException` | "Project 0b8f... not found" |
@@ -2191,12 +2276,12 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | Passwords | BCrypt (`BCryptPasswordEncoder`), never returned (`UserResponse` has no hash) |
 | Tokens | HS256 JWT, 60-minute expiry, claims `userId` and `role` (+ `sub`), secret from `JWT_SECRET` (startup fails if shorter than 32 bytes) |
 | Sessions | Stateless (`SessionCreationPolicy.STATELESS`), CSRF disabled because no cookies are used |
-| Authorization layer 1 | `@PreAuthorize("hasRole(...)")` on controller methods: STUDENT for create/edit/submit/revise, COORDINATOR for assign and user list, FACULTY for reviews |
+| Authorization layer 1 | `@PreAuthorize("hasRole(...)")` on controller methods: STUDENT for create/edit/submit/revise, COORDINATOR for assign, user list and account creation, FACULTY for reviews |
 | Authorization layer 2 | Ownership and assignment in the service/domain: `ProjectAccessPolicy` for reads and proposal edits, `Guards` inside state transitions. Needed because a role check cannot tell which student owns which project. |
 | Visibility | Business rule 1: `ProjectService.listProjects` scopes queries by role; `requireView` on every per-project read |
 | Errors | 401/403 from the filter chain are written by `RestAuthErrorHandler` in `ApiError` format; no stack traces in responses |
 | CORS | Only `prastav.cors.allowed-origin` (default `http://localhost:5173`) for `/api/**`; in development Vite proxies `/api`, so the browser uses one origin |
-| Registration | Self-registration limited to STUDENT and FACULTY; the coordinator account comes from seed data |
+| Registration | Self-registration limited to STUDENT with an institutional student email (`PatternEmailPolicy`); FACULTY and COORDINATOR accounts come from `POST /api/users` (COORDINATOR only) or the seed |
 | Frontend | Token in `localStorage` (acceptable for an intranet demo; M2 hardening option: httpOnly cookie). A 401 response clears the session. Route guards hide pages by role; the backend remains the authority. |
 
 ## 13. Design patterns
@@ -2207,7 +2292,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | Factory | `ProjectStateFactory` (status to state), `ProposalVersionFactory` (v1 and vN+1 prefilled) | Creation and lookup rules live in one place |
 | Facade | `WorkflowService` | One simple API over states, persistence and events; every transition takes the same audited path |
 | Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener`; [M2] `NotificationListener` | Side effects decoupled from the workflow |
-| Strategy | `ReviewDecisionHandler` + `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`; [M2] `NotificationChannel` + `InAppNotificationChannel`, `EmailNotificationChannel` | Add a decision or channel by adding a class |
+| Strategy | `ReviewDecisionHandler` + `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`; `EmailPolicy` + `PatternEmailPolicy` (institution email rules, swappable per institution); [M2] `NotificationChannel` + `InAppNotificationChannel`, `EmailNotificationChannel` | Add a decision or channel by adding a class |
 | Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects` | One composable query for every list filter instead of a repository method per combination |
 | Repository | `UserRepository`, `ProjectRepository`, `ProposalVersionRepository`, `ReviewRepository`, `AuditLogRepository` | Persistence abstraction (Spring Data JPA) |
 | Builder | `AuditLog.builder()` / `AuditLog.Builder` | Readable construction with optional fields |
@@ -2243,7 +2328,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | `ddl-auto: none` | `validate` | Flyway is the single source of truth; avoids `TEXT` vs `VARCHAR` false alarms | Mapping errors surface at first query, not at startup |
 | `open-in-view: false`, eager owner/reviewer | OSIV | No lazy loading from controllers | A few extra joins/selects on lists (fine for demo data; M2 pagination uses entity graphs) |
 | REJECTED is final | Coordinator reopen | PRD V1 | A reopen would be a new state/transition |
-| Coordinator not self-registered | Open registration | Prevent privilege escalation | Coordinator created by seed data |
+| Only students self-register | Open registration | Prevent privilege escalation; tie student accounts to the institution | `PatternEmailPolicy`; staff created by the coordinator or seed data |
 
 ### 15.2 Known limitations in M1
 
@@ -2275,6 +2360,11 @@ The project list is not paginated (M2). The timeline is API-only (UI tab is M2).
 | `ProjectServiceTest` | create in DRAFT with v1 and event; faculty cannot create; list paging, sort and first-submission time; counts per role with zero-filled statuses and awaiting-assignment for the coordinator; stranger 403; latest submitted version in detail |
 | `ProjectListQueryTest` | defaults, trimming, page-size clamping, LIKE wildcard escaping |
 | `AuditEventListenerTest` | status change becomes an audit row with before/after and JSON details; action mapping |
+| `PatternEmailPolicyTest` | valid student email parsed to year and branch; uppercase input normalized; wrong domain, missing or malformed year or branch rejected; faculty email institutional but not a student email |
+| `InstitutionConfigTest` | the shipped `application.yml` binds `InstitutionProperties` and parses a demo student email |
+| `AuthServiceTest` | student registration stores admission year and branch; omitted role means STUDENT; FACULTY and COORDINATOR, faculty-style email, other domain and duplicate email rejected |
+| `UserServiceTest` | coordinator creates FACULTY and COORDINATOR without the student pattern; other callers 403; STUDENT, other domain and duplicate email rejected |
+| `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400 |
 | `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project |
 | `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding and `X-Total-Count`; unknown status 400; summary body |
 

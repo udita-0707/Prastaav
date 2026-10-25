@@ -16,7 +16,33 @@ class User {
   - email : String
   - passwordHash : String
   - role : Role
+  - admissionYear : Integer
+  - branch : String
+  + {static} student(name : String, studentEmail : StudentEmail, passwordHash : String) : User
   + toActor() : Actor
+}
+
+class StudentEmail <<record>> {
+  email : String
+  admissionYear : int
+  branch : String
+}
+
+interface EmailPolicy <<Strategy>> {
+  + requireInstitutional(email : String) : String
+  + requireStudent(email : String) : StudentEmail
+}
+
+class PatternEmailPolicy {
+  - institution : InstitutionProperties
+  - domainSuffix : String
+  - studentLocalPart : Pattern
+}
+
+class InstitutionProperties <<record>> {
+  name : String
+  emailDomain : String
+  studentEmailPattern : String
 }
 
 enum Role {
@@ -144,6 +170,10 @@ BaseEntity <|-- AuditLog
 BaseEntity <|-- Notification
 
 User --> Role
+User ..> StudentEmail : student()
+EmailPolicy <|.. PatternEmailPolicy
+PatternEmailPolicy --> InstitutionProperties
+EmailPolicy ..> StudentEmail : parses
 Project "*" --> "1" User : owner
 Project "*" --> "0..1" User : reviewer
 Project --> ProjectStatus

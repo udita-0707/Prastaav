@@ -11,7 +11,6 @@ import type {
   ProposalVersionResponse,
   ReviewRequest,
   ReviewResponse,
-  Role,
   TimelineEntry,
   UserResponse,
 } from './types';
@@ -19,8 +18,8 @@ import type {
 export const login = (email: string, password: string) =>
   api.post<AuthResponse>('/auth/login', { email, password }).then((r) => r.data);
 
-export const register = (name: string, email: string, password: string, role: Role) =>
-  api.post<AuthResponse>('/auth/register', { name, email, password, role }).then((r) => r.data);
+export const register = (name: string, email: string, password: string) =>
+  api.post<AuthResponse>('/auth/register', { name, email, password }).then((r) => r.data);
 
 export const listFaculty = () =>
   api.get<UserResponse[]>('/users', { params: { role: 'FACULTY' } }).then((r) => r.data);

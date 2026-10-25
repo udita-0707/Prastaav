@@ -1,6 +1,6 @@
 @startuml 12_events_and_strategies
 !include _style.iuml
-title Prastav - Observer (domain events) and Strategy (review decisions, notification channels)
+title Prastav - Observer (domain events) and Strategy (review decisions, email policy, notification channels)
 hide empty members
 
 package "Observer: events" {
@@ -61,6 +61,23 @@ package "Strategy: review decisions" {
     + listReviews(projectId : UUID, actor : Actor) : List<Review>
   }
   ReviewService o--> ReviewDecisionHandler
+}
+
+package "Strategy: institution email policy" {
+  interface EmailPolicy {
+    + requireInstitutional(email : String) : String
+    + requireStudent(email : String) : StudentEmail
+  }
+  class PatternEmailPolicy
+  EmailPolicy <|.. PatternEmailPolicy
+  class AuthService {
+    + register(name, email, password, role) : AuthResult
+  }
+  class UserService {
+    + createAccount(actor, name, email, password, role) : User
+  }
+  AuthService --> EmailPolicy : requireStudent()
+  UserService --> EmailPolicy : requireInstitutional()
 }
 
 class WorkflowService <<Facade>>

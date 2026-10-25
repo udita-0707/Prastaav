@@ -31,7 +31,7 @@ public class AuthController {
 
     @PostMapping("/register")
     @ResponseStatus(HttpStatus.CREATED)
-    @Operation(summary = "Register a STUDENT or FACULTY account")
+    @Operation(summary = "Register a STUDENT account with an institutional student email")
     public AuthResponse register(@Valid @RequestBody RegisterRequest request) {
         return UserMapper.toAuthResponse(
                 authService.register(request.name(), request.email(), request.password(), request.role()));

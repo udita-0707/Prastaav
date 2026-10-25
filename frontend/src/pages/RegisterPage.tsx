@@ -2,11 +2,10 @@ import { ArrowRight, Eye, EyeOff, Lock, Mail, UserRound } from 'lucide-react';
 import { useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { errorMessage, fieldErrors } from '../api/client';
-import type { Role } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ErrorNote } from '../components/ErrorNote';
-import { Button, Card, Input, Select } from '../components/ui';
-import { PRODUCT_NAME } from '../config/brand';
+import { Button, Card, Input } from '../components/ui';
+import { INSTITUTION_EMAIL_DOMAIN, PRODUCT_NAME } from '../config/brand';
 import { AuthLayout } from '../layouts/AuthLayout';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
 
@@ -19,7 +18,6 @@ export function RegisterPage() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [role, setRole] = useState<Role>('STUDENT');
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
@@ -32,7 +30,9 @@ export function RegisterPage() {
     <AuthLayout>
       <Card className="p-6 sm:p-10">
         <h2 className="text-3xl font-bold tracking-tight text-ink">Create your account</h2>
-        <p className="mt-2 text-muted">Join {PRODUCT_NAME} as a student or faculty member.</p>
+        <p className="mt-2 text-muted">
+          Join {PRODUCT_NAME} as a student. Faculty and coordinator accounts are created by your coordinator.
+        </p>
         <form
           className="mt-8 space-y-5"
           onSubmit={async (e) => {
@@ -42,7 +42,7 @@ export function RegisterPage() {
             setError(null);
             setFields({});
             try {
-              await register(name, email, password, role);
+              await register(name, email, password);
               navigate('/app', { replace: true });
             } catch (err) {
               const byField = fieldErrors(err);
@@ -65,14 +65,14 @@ export function RegisterPage() {
             autoFocus
           />
           <Input
-            label="Institutional email"
+            label="Student email"
             type="email"
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="name@college.edu"
+            placeholder={`firstname.23csai@${INSTITUTION_EMAIL_DOMAIN}`}
             icon={<Mail className="h-4 w-4" />}
-            hint="Any valid email address works; use the one your institution gave you so reviewers recognise you."
+            hint={`Your institutional student email: firstname, admission year and branch, e.g. aarav.23csai@${INSTITUTION_EMAIL_DOMAIN}.`}
             maxLength={255}
             error={fields.email}
             required
@@ -113,10 +113,6 @@ export function RegisterPage() {
               required
             />
           </div>
-          <Select label="I am a" value={role} onChange={(e) => setRole(e.target.value as Role)} error={fields.role}>
-            <option value="STUDENT">Student</option>
-            <option value="FACULTY">Faculty member</option>
-          </Select>
           <ErrorNote message={error} />
           <Button type="submit" variant="gradient" size="lg" className="w-full" loading={busy} disabled={Boolean(mismatch)} trailingIcon={<ArrowRight className="h-4 w-4" aria-hidden />}>
             Create account

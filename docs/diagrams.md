@@ -53,7 +53,32 @@ classDiagram
     -String email
     -String passwordHash
     -Role role
+    -Integer admissionYear
+    -String branch
+    +student(String name, StudentEmail studentEmail, String passwordHash)$ User
     +toActor() Actor
+  }
+  class StudentEmail {
+    <<record>>
+    String email
+    int admissionYear
+    String branch
+  }
+  class EmailPolicy {
+    <<interface>>
+    +requireInstitutional(String email) String
+    +requireStudent(String email) StudentEmail
+  }
+  class PatternEmailPolicy {
+    -InstitutionProperties institution
+    -String domainSuffix
+    -Pattern studentLocalPart
+  }
+  class InstitutionProperties {
+    <<record>>
+    String name
+    String emailDomain
+    String studentEmailPattern
   }
   class Role {
     <<enumeration>>
@@ -174,6 +199,10 @@ classDiagram
   BaseEntity <|-- AuditLog
   BaseEntity <|-- Notification
   User --> Role
+  User ..> StudentEmail : student()
+  EmailPolicy <|.. PatternEmailPolicy
+  PatternEmailPolicy --> InstitutionProperties
+  EmailPolicy ..> StudentEmail : parses
   Project "*" --> "1" User : owner
   Project "*" --> "0..1" User : reviewer
   Project --> ProjectStatus
@@ -461,6 +490,8 @@ erDiagram
     VARCHAR email UK
     VARCHAR password_hash
     VARCHAR role
+    INTEGER admission_year "nullable, indexed with branch"
+    VARCHAR branch "nullable"
     TIMESTAMPTZ created_at
   }
   projects {
@@ -600,6 +631,21 @@ classDiagram
   ApproveDecisionHandler --> WorkflowService
   RequestRevisionDecisionHandler --> WorkflowService
   RejectDecisionHandler --> WorkflowService
+  class EmailPolicy {
+    <<interface>>
+    +requireInstitutional(String email) String
+    +requireStudent(String email) StudentEmail
+  }
+  class PatternEmailPolicy
+  EmailPolicy <|.. PatternEmailPolicy
+  class AuthService {
+    +register(name, email, password, role) AuthResult
+  }
+  class UserService {
+    +createAccount(actor, name, email, password, role) User
+  }
+  AuthService --> EmailPolicy : requireStudent()
+  UserService --> EmailPolicy : requireInstitutional()
   class NotificationListener {
     <<M2>>
     +on(ProjectStatusChangedEvent)
