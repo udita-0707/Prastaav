@@ -1,5 +1,4 @@
-# Milestone 1: PostgreSQL only. The backend and frontend run locally (see README.md).
-# Containerising backend and frontend is planned for Milestone 2.
+# PostgreSQL for development. The backend and frontend run locally (see README.md).
 services:
   db:
     image: postgres:16-alpine
@@ -9,7 +8,7 @@ services:
       POSTGRES_USER: prastav
       POSTGRES_PASSWORD: prastav
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - prastav-db-data:/var/lib/postgresql/data
     healthcheck:
