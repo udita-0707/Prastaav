@@ -38,6 +38,13 @@ prastav:
     enabled: ${SEED_DEMO_DATA:true}
     # Shared password of every demo account. Development default only.
     demo-password: ${DEMO_PASSWORD:Password@123}
+  notification:
+    # Channels every notification is sent through, in order: in-app (stored inbox) and email (logged only).
+    enabled-channels: ${NOTIFICATION_CHANNELS:in-app,email}
+    # Every channel is retried: attempts in total including the first, and the pause between attempts.
+    retry:
+      max-attempts: ${NOTIFICATION_RETRY_MAX_ATTEMPTS:3}
+      delay: ${NOTIFICATION_RETRY_DELAY:200ms}
 
 springdoc:
   swagger-ui:

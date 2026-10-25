@@ -545,7 +545,7 @@ flowchart TB
   FLY --> DB
 ```
 
-## 11. Observer and Strategy
+## 11. Observer, Strategy and Decorator (events, review decisions, email policy, notification channels and retries)
 
 ```mermaid
 classDiagram
@@ -600,4 +600,38 @@ classDiagram
   }
   AuthService --> EmailPolicy : requireStudent()
   UserService --> EmailPolicy : requireInstitutional()
+  class NotificationChannel {
+    <<interface>>
+    +name() String
+    +deliver(Notification notification)
+  }
+  class InAppNotificationChannel {
+    -NotificationService notificationService
+  }
+  class EmailNotificationChannel
+  NotificationChannel <|.. InAppNotificationChannel
+  NotificationChannel <|.. EmailNotificationChannel
+  class RetryingNotificationChannel {
+    <<Decorator>>
+    -NotificationChannel delegate
+    -int maxAttempts
+    -Duration delay
+  }
+  NotificationChannel <|.. RetryingNotificationChannel
+  RetryingNotificationChannel o--> NotificationChannel : delegate
+  class NotificationDispatcher {
+    -List~NotificationChannel~ enabledChannels
+    +dispatch(Notification notification)
+  }
+  class NotificationProperties {
+    <<record>>
+    +enabledChannels() List~String~
+    +retry() Retry
+  }
+  NotificationDispatcher o--> RetryingNotificationChannel : wraps each enabled channel
+  NotificationDispatcher ..> NotificationProperties : enabled-channels, retry
+  class NotificationService {
+    +create(recipient, project, type, message) Notification
+  }
+  InAppNotificationChannel --> NotificationService : create()
 ```
