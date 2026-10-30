@@ -163,6 +163,20 @@ export interface ApiError {
   fieldErrors: { field: string; message: string }[];
 }
 
+export interface FieldDiff {
+  name: keyof ProposalContent;
+  fromValue: string | null;
+  toValue: string | null;
+  changed: boolean;
+}
+
+/** Body of GET /api/projects/{id}/proposals/compare: every proposal field, in form order. */
+export interface ProposalDiff {
+  fromVersion: number;
+  toVersion: number;
+  fields: FieldDiff[];
+}
+
 export type TimelineEntryType = 'VERSION_CREATED' | 'STATUS_CHANGED' | 'REVIEW';
 
 export interface TimelineEntry {

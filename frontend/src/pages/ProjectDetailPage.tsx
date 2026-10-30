@@ -8,9 +8,10 @@ import { createNextVersion, getHistory, getProject, listReviews, listVersions, s
 import type { ProjectDetailResponse, ProjectStatus, ReviewResponse, TimelineEntry } from '../api/types';
 import { AssignReviewerPanel } from '../components/AssignReviewerPanel';
 import { ErrorNote } from '../components/ErrorNote';
-import { DECISION_LABEL, FIELD_LABEL, STATUS_LABEL } from '../components/labels';
+import { DECISION_LABEL, FIELD_LABEL, STATUS_LABEL, TIMELINE_TYPE_LABEL } from '../components/labels';
 import { ProposalView } from '../components/ProposalFields';
 import { ReviewPanel } from '../components/ReviewPanel';
+import { VersionCompare } from '../components/VersionCompare';
 import { Avatar, AvatarStack, Button, ButtonLink, Card, EmptyState, Modal, Skeleton, StatusPill, TabPanel, Tabs, useToast } from '../components/ui';
 import { WorkflowRail } from '../components/WorkflowRail';
 import { formatDateTime, formatDay } from '../lib/format';
@@ -18,7 +19,7 @@ import { parseTeam } from '../lib/people';
 import { ProjectIcon } from '../lib/projectIcon';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
 
-type TabId = 'overview' | 'versions' | 'reviews' | 'timeline';
+type TabId = 'overview' | 'versions' | 'compare' | 'reviews' | 'timeline';
 
 /** What to tell someone who has no action available right now. */
 function waitingMessage(project: ProjectDetailResponse): string {
@@ -213,6 +214,7 @@ export function ProjectDetailPage() {
             tabs={[
               { id: 'overview', label: 'Overview' },
               { id: 'versions', label: 'Versions', count: versions.data?.length },
+              { id: 'compare', label: 'Compare' },
               { id: 'reviews', label: 'Reviews', count: reviews.data?.length },
               { id: 'timeline', label: 'Timeline' },
             ]}
@@ -277,6 +279,14 @@ export function ProjectDetailPage() {
               </TabPanel>
             )}
 
+            {tab === 'compare' && (
+              <TabPanel idPrefix="project" id="compare">
+                {versions.isLoading && <Skeleton className="h-40 w-full" />}
+                <ErrorNote message={versions.error ? errorMessage(versions.error) : null} onRetry={() => versions.refetch()} />
+                {versions.data && <VersionCompare key={versions.data.length} projectId={id} versions={versions.data} />}
+              </TabPanel>
+            )}
+
             {tab === 'reviews' && (
               <TabPanel idPrefix="project" id="reviews">
                 {reviews.isLoading && <Skeleton className="h-32 w-full" />}
@@ -298,9 +308,10 @@ export function ProjectDetailPage() {
                           <span className="absolute -left-[37px] flex h-6 w-6 items-center justify-center rounded-full bg-white text-brand-600 ring-2 ring-line">
                             <Icon className="h-3.5 w-3.5" aria-hidden />
                           </span>
-                          <p className="text-sm font-semibold text-ink">{describe(entry)}</p>
+                          <span className="text-xs font-semibold uppercase tracking-wide text-brand-700">{TIMELINE_TYPE_LABEL[entry.type]}</span>
+                          <p className="mt-0.5 text-sm font-semibold text-ink">{describe(entry)}</p>
                           <p className="mt-0.5 text-xs text-muted">
-                            {entry.actorName ?? 'Someone'} · {formatDateTime(entry.at)}
+                            {entry.actorName ?? 'Someone'} · <time dateTime={entry.at}>{formatDateTime(entry.at)}</time>
                           </p>
                         </li>
                       );
