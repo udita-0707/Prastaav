@@ -25,9 +25,10 @@ flowchart LR
   UC12["View dashboard counts by status"]
   UC13["Create faculty or coordinator account"]
   UC14["Read and mark own notifications"]
+  UC15["View coordinator dashboard (awaiting assignment, reviewer workload)"]
   Student --> UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC9 & UC11 & UC12 & UC14
   Faculty --> UC1 & UC8 & UC5 & UC11 & UC12 & UC14
-  Coordinator --> UC1 & UC7 & UC10 & UC9 & UC11 & UC12 & UC13 & UC14
+  Coordinator --> UC1 & UC7 & UC10 & UC9 & UC11 & UC12 & UC13 & UC14 & UC15
 ```
 
 ## 2. Domain class diagram
@@ -553,7 +554,7 @@ flowchart TB
     SEC["Security: JwtAuthenticationFilter, SecurityConfig, @PreAuthorize"]
     WEB["Controllers + DTO mappers, GlobalExceptionHandler"]
     AUTH["auth: UserService, AuthService, JwtService"]
-    PROJ["project: ProjectService, ProjectStore, ProjectAccessPolicy, ProjectHistoryService"]
+    PROJ["project: ProjectService, ProjectStore, ProjectAccessPolicy, ProjectHistoryService, DashboardService"]
     PROP["proposal: ProposalService, ProposalVersionFactory"]
     REV["review: ReviewService, ReviewDecisionHandler x3"]
     WF["workflow: WorkflowService, ProjectState x6, ProjectStateFactory"]
