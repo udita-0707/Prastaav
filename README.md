@@ -11,17 +11,22 @@
 - Follow the status on the home dashboard (totals, drafts, in review, approved) and get an alert when a reviewer requests changes.
 - Read the reviewer's feedback, start the next version (prefilled from the last one) and resubmit it to the same reviewer.
 - Browse earlier versions, reviews and the full timeline of a project, and compare any two versions field by field.
+- Get a notification for every review decision on your project (approved, changes requested, rejected).
 
 **Faculty**
 - See the projects assigned to you, with counts of pending reviews and projects awaiting student changes.
 - Review the latest submitted version: approve, request changes or reject. Comments are required for the last two.
 - A "Reviews" list shows what waits for your decision, the longest-waiting first.
+- Get a notification when a project is assigned to you and when a student resubmits it.
 
 **Coordinator**
 - See every project with counts by status, search, status and faculty filters, a batch filter (admission year and branch of the project owner), sorting and paging.
 - Assign a faculty reviewer to submitted projects from the "Assign Faculty" page, from any list row or from the project page.
 - Follow every review in progress from the "Reviews" list.
 - Create faculty and coordinator accounts on the institutional domain through `POST /api/users`.
+
+**Everyone**
+- A personal notification inbox through the API (`/api/notifications`): page through it, show only unread ones, count unread, mark one or all as read. Each notification is stored in-app and also written to the server log as the email that would be sent.
 
 ### Screens
 
@@ -42,7 +47,7 @@ The mockups the screens follow are in [`docs/design`](docs/design/README.md).
 
 ## Architecture
 
-A **modular monolith**: one Spring Boot application and one PostgreSQL database, organised by module (`auth`, `project`, `proposal`, `review`, `workflow`, `audit`, `notification`, `common`). The workflow engine uses the State pattern: each project status is a class that owns its legal actions, so an illegal transition is rejected with `409 ILLEGAL_TRANSITION`. Domain events feed the audit log. The API returns `allowedActions` for the caller with every project, and the web app only shows the buttons the backend allows.
+A **modular monolith**: one Spring Boot application and one PostgreSQL database, organised by module (`auth`, `project`, `proposal`, `review`, `workflow`, `audit`, `notification`, `common`). The workflow engine uses the State pattern: each project status is a class that owns its legal actions, so an illegal transition is rejected with `409 ILLEGAL_TRANSITION`. Domain events feed the audit log and, once the change has committed, the notifications. The API returns `allowedActions` for the caller with every project, and the web app only shows the buttons the backend allows.
 
 The web app is a React single-page app. Pages are composed from a small design system (`frontend/src/components/ui`), data comes from the REST API through TanStack Query, and list filters live in the URL so a filtered list can be shared. See `docs/LLD.md` for the full design, including the frontend architecture.
 
@@ -165,6 +170,10 @@ Base path `/api`; every endpoint except register, login and Swagger needs `Autho
 | POST | `/projects/{id}/assign` | coordinator | Assign a faculty reviewer |
 | POST / GET | `/projects/{id}/reviews` | assigned faculty / participant | Record a decision / list reviews |
 | GET | `/projects/{id}/history` | participant | Timeline of versions, reviews and status changes |
+| GET | `/notifications` | any (own) | The caller's notifications, newest first; optional `unread=true`, `page` (from 0), `size` (1 to 50, default 10); returns `{ content, page, size, totalElements, totalPages }` |
+| GET | `/notifications/unread-count` | any (own) | `{ count }` of unread notifications |
+| PATCH | `/notifications/{id}/read` | recipient | Mark one notification read; another user's notification gives `403 FORBIDDEN` |
+| PATCH | `/notifications/read-all` | any (own) | Mark every unread notification read; returns `{ updated }` |
 
 ## Project structure
 
@@ -177,7 +186,7 @@ backend/src/main/java/com/prastav/
   proposal/   immutable versions, factory, draft editing  (+ web/)
   review/     review decisions as strategies               (+ web/)
   audit/      append-only audit log fed by domain events
-  notification/ notifications: entity, per-user inbox queries, read flags, delivery channels, retry decorator and dispatcher (+ web/ DTO and mapper)
+  notification/ notifications: event listener, dispatcher, delivery channels, retry decorator, per-user inbox and read flags (+ web/ inbox endpoints)
 backend/src/main/resources/db/migration/   Flyway migrations
 frontend/
   public/brand/          logo, logo mark, favicon
@@ -213,7 +222,7 @@ cd frontend && npm run typecheck           # TypeScript type check
 cd frontend && npm run build               # type check and production build
 ```
 
-Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery` (paging defaults and bounds), `ProjectSpecifications` (role scope and filters), the audit listener, `PatternEmailPolicy` (with the shipped configuration), registration in `AuthService`, account creation in `UserService` and `NotificationService` (inbox scoping, unread count, read ownership), `NotificationDispatcher` (enabled channels in order, a failing channel does not stop the others, disabled channels skipped), `RetryingNotificationChannel` (no retry on success, success on a later attempt, gives up after max attempts) and the in-app and email channels. `UserControllerWebTest` checks the coordinator-only `POST /api/users`. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters, the page envelope, invalid list parameters and the summary endpoint.
+Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery` (paging defaults and bounds), `ProjectSpecifications` (role scope and filters), the audit listener, `PatternEmailPolicy` (with the shipped configuration), registration in `AuthService`, account creation in `UserService` and `NotificationService` (inbox scoping, paging bounds, unread count, read ownership), `NotificationListener` (who is notified for an assignment, a resubmission and each review decision, and that other status changes notify nobody), `NotificationDispatcher` (enabled channels in order, a failing channel does not stop the others, disabled channels skipped), `RetryingNotificationChannel` (no retry on success, success on a later attempt, gives up after max attempts) and the in-app and email channels. `UserControllerWebTest` checks the coordinator-only `POST /api/users`. `NotificationControllerWebTest` checks that every role reaches only its own inbox, the paging parameters and envelope, and the 400, 401, 403 and 404 responses. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters, the page envelope, invalid list parameters and the summary endpoint.
 
 ## Design patterns
 
@@ -222,7 +231,7 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 | State | `ProjectState` and its six status classes |
 | Factory | `ProjectStateFactory`, `ProposalVersionFactory` |
 | Facade | `WorkflowService` |
-| Observer | domain events consumed by `AuditEventListener` |
+| Observer | domain events consumed by `AuditEventListener` (audit log) and `NotificationListener` (notifications after commit) |
 | Strategy | `ReviewDecisionHandler` and its three decision handlers; `EmailPolicy` with `PatternEmailPolicy` for account emails; `NotificationChannel` with `InAppNotificationChannel` and `EmailNotificationChannel`, run by `NotificationDispatcher` |
 | Decorator | `RetryingNotificationChannel` retries every enabled notification channel |
 | Specification | `ProjectSpecifications` for the filtered project list |

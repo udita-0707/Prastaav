@@ -544,13 +544,13 @@ flowchart TB
     REV["review: ReviewService, ReviewDecisionHandler x3"]
     WF["workflow: WorkflowService, ProjectState x6, ProjectStateFactory"]
     AUD["audit: AuditEventListener, AuditRecorder, AuditQueryService"]
-    NOTIF["notification: NotificationService"]
+    NOTIF["notification: NotificationListener, NotificationDispatcher, NotificationService"]
     REPO["Spring Data JPA repositories"]
     FLY["Flyway migrations"]
   end
   DB[("PostgreSQL 16 (docker-compose)")]
   FE -->|"REST + Bearer JWT"| SEC --> WEB
-  WEB --> AUTH & PROJ & PROP & REV & WF
+  WEB --> AUTH & PROJ & PROP & REV & WF & NOTIF
   REV -->|strategies| WF
   PROJ --> PROP
   PROP -->|allowed actions| WF
@@ -558,6 +558,9 @@ flowchart TB
   PROJ -.->|events| AUD
   PROP -.->|events| AUD
   REV -.->|events| AUD
+  WF -.->|events, after commit| NOTIF
+  REV -.->|events, after commit| NOTIF
+  NOTIF --> PROJ
   AUTH & PROJ & PROP & REV & AUD --> REPO
   NOTIF --> REPO
   REPO --> DB
@@ -584,6 +587,14 @@ classDiagram
   class JpaAuditRecorder
   AuditRecorder <|.. JpaAuditRecorder
   AuditEventListener --> AuditRecorder
+  class NotificationListener {
+    -ProjectStore projectStore
+    -NotificationDispatcher dispatcher
+    +on(ProjectStatusChangedEvent)
+    +on(ReviewRecordedEvent)
+  }
+  note for NotificationListener "@TransactionalEventListener (after commit), REQUIRES_NEW.<br/>ASSIGN_REVIEWER and SUBMIT from REVISION_REQUESTED notify the reviewer;<br/>a review decision notifies the owner"
+  NotificationListener --> NotificationDispatcher : dispatch()
   class ReviewDecisionHandler {
     <<interface>>
     +decision() ReviewDecision

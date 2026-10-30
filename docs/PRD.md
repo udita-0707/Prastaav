@@ -49,7 +49,7 @@ Product decisions: one assigned faculty reviewer per project; a REJECTED project
 | FR-10 | Every state change, assignment, submission and review recorded in audit log (who, what, when, before/after) |
 | FR-11 | Project timeline view (all versions, reviews, status changes in order) |
 | FR-12 | Role-scoped project lists with status filter, case-insensitive search, a coordinator-only batch filter (owner's admission year and branch; other roles passing it get `FORBIDDEN`) and pagination (page from 0, size 1 to 50, default 10); filtering and paging run in the database; invalid parameters are rejected with `VALIDATION_FAILED` |
-| FR-13 | In-app notifications on assignment, review decision, resubmission, delivered through the configured channels (in-app inbox; email written to the log), each retried a configured number of times |
+| FR-13 | Notifications on reviewer assignment (to the faculty member), review decision (to the student owner) and resubmission (to the faculty member), sent only after the change commits and delivered through the configured channels (in-app inbox; email written to the log), each retried a configured number of times. Every user reads only their own inbox: paged list with an unread filter (page from 0, size 1 to 50, default 10), unread count, mark one or all as read; another user's notification is `FORBIDDEN` |
 | FR-14 | Compare two proposal versions of one project field by field: every proposal field with its value in each version and whether it changed; project participants only; a version outside the project is `NOT_FOUND`, the same version on both sides is `VALIDATION_FAILED` |
 | FR-15 | Coordinator dashboard: counts by status, pending-assignment list, reviewer workload |
 | FR-16 | Coordinator audit-log viewer with filters |
@@ -121,6 +121,8 @@ flowchart LR
   REPO --> DB[(PostgreSQL)]
   WF -->|domain events| EVT[Event listener: audit]
   EVT --> REPO
+  WF -->|domain events, after commit| NL[Event listener: notifications]
+  NL --> REPO
 ```
 
 Layers per module: `web` (controller + DTOs) → `service` (use cases, transactions) → `domain` (entities, rules, state objects) → `repository` (Spring Data JPA).
@@ -135,7 +137,7 @@ com.prastav
  ├─ review      (Review, ReviewDecision, ReviewService, ReviewController)
  ├─ workflow    (ProjectStatus, ProjectState + 6 state classes, ProjectStateFactory, WorkflowService)
  ├─ audit       (AuditLog, AuditEventListener, AuditQueryService)
- ├─ notification (Notification, NotificationType, NotificationRepository, NotificationService, NotificationChannel, InAppNotificationChannel, EmailNotificationChannel, NotificationDispatcher, NotificationProperties, RetryingNotificationChannel; web: NotificationResponse, NotificationMapper)
+ ├─ notification (Notification, NotificationType, NotificationRepository, NotificationService, NotificationChannel, InAppNotificationChannel, EmailNotificationChannel, NotificationDispatcher, NotificationProperties, RetryingNotificationChannel, NotificationListener; web: NotificationController, NotificationResponse, NotificationPageResponse, UnreadCountResponse, MarkAllReadResponse, NotificationMapper)
  └─ common      (ApiError, GlobalExceptionHandler, exceptions, base entity)
 ```
 
@@ -189,7 +191,7 @@ public class DraftState implements ProjectState {
 | Pattern | Where | Why |
 | --- | --- | --- |
 | State | `workflow` module | Replaces status if/else chains; legal transitions per state |
-| Observer (Spring events) | `ProjectStatusChangedEvent`, `ReviewRecordedEvent` → `AuditEventListener` | Audit decoupled from workflow |
+| Observer (Spring events) | `ProjectStatusChangedEvent`, `ReviewRecordedEvent` → `AuditEventListener` and `NotificationListener` | Audit and notifications decoupled from workflow |
 | Factory | `ProjectStateFactory`, `ProposalVersionFactory` (new version from previous) | Centralized object creation |
 | Strategy | `ReviewDecisionHandler` per decision (Approve/Revise/Reject); `EmailPolicy` / `PatternEmailPolicy` for account emails; `NotificationChannel` (in-app, email log) run by `NotificationDispatcher` | Add behaviour without modifying services |
 | Decorator | `RetryingNotificationChannel` around every enabled `NotificationChannel` | Retries without changing any channel |
@@ -231,6 +233,10 @@ Base path `/api`. All except auth require `Authorization: Bearer <jwt>`.
 | POST | /projects/{id}/reviews | FACULTY (assigned) | Body: decision, comments |
 | GET | /projects/{id}/reviews | participants | Review history |
 | GET | /projects/{id}/history | participants | Merged timeline (versions + reviews + status changes) |
+| GET | /notifications?unread=&page=&size= | any (own) | The caller's notifications, newest first; returns `{ content, page, size, totalElements, totalPages }` (FR-13) |
+| GET | /notifications/unread-count | any (own) | `{ count }` of unread notifications |
+| PATCH | /notifications/{id}/read | recipient | Mark one notification read |
+| PATCH | /notifications/read-all | any (own) | Mark all unread notifications read; returns `{ updated }` |
 
 Error format: `{ timestamp, status, code, message, path, fieldErrors[] }`. Codes: `VALIDATION_FAILED` 400, `UNAUTHENTICATED` 401, `FORBIDDEN` 403, `NOT_FOUND` 404, `ILLEGAL_TRANSITION` 409, `CONCURRENT_UPDATE` 409.
 

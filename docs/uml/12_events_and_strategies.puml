@@ -33,6 +33,23 @@ AuditEventListener ..> ProposalDraftUpdatedEvent
 AuditEventListener ..> ProjectStatusChangedEvent
 AuditEventListener ..> ReviewRecordedEvent
 
+class NotificationListener {
+  - projectStore : ProjectStore
+  - dispatcher : NotificationDispatcher
+  + on(event : ProjectStatusChangedEvent)
+  + on(event : ReviewRecordedEvent)
+}
+note right of NotificationListener
+  @TransactionalEventListener (after commit)
+  @Transactional(REQUIRES_NEW)
+  ASSIGN_REVIEWER -> reviewer
+  SUBMIT from REVISION_REQUESTED -> reviewer
+  review decision -> owner
+end note
+NotificationListener ..> ProjectStatusChangedEvent
+NotificationListener ..> ReviewRecordedEvent
+NotificationListener --> NotificationDispatcher : dispatch()
+
 package "Strategy: review decisions" {
   interface ReviewDecisionHandler {
     + decision() : ReviewDecision

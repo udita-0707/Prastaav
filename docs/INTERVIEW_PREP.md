@@ -17,7 +17,7 @@ Each status owns its rules in one small class (`DraftState`, `UnderReviewState`,
 A reviewer's decision must refer to exactly the text they read, and the audit trail must be trustworthy. It is enforced in three layers: `ProposalVersion.updateContent()` and `submit()` throw `ConflictException` once SUBMITTED; `ProposalService.updateDraft` first asks the state whether EDIT_DRAFT is allowed (409 otherwise); and the database trigger `trg_proposal_versions_immutable` rejects any UPDATE or DELETE on a submitted row, even from SQL. Changes after submission happen only by creating version N+1 through `ProposalVersionFactory.nextDraftFrom`.
 
 **5. Why events for auditing, and why is the audit listener synchronous?**
-The workflow should not know auditing exists (SRP), and a new side effect is a new listener, not an edit to `WorkflowService` (OCP). The listener is a plain `@EventListener`, so it runs inside the publisher's transaction: an audit row exists if and only if the change committed. A notification listener would instead use `@TransactionalEventListener(AFTER_COMMIT)`, because a notification must never be sent for a change that rolled back. That difference is deliberate.
+The workflow should not know auditing exists (SRP), and a new side effect is a new listener, not an edit to `WorkflowService` (OCP). The listener is a plain `@EventListener`, so it runs inside the publisher's transaction: an audit row exists if and only if the change committed. `NotificationListener` instead uses `@TransactionalEventListener` (after commit) in a new transaction, because a notification must never be sent for a change that rolled back, and a failed delivery must never roll the change back. That difference is deliberate.
 
 **6. How do you stop two people changing the same project at the same time?**
 `Project` has `@Version Long version`. Hibernate adds `WHERE version = ?` to the update; if another transaction committed first, the update hits zero rows and Spring throws `OptimisticLockingFailureException`, which `GlobalExceptionHandler` turns into 409 `CONCURRENT_UPDATE`. If the second request arrives after the first committed, it simply loads the new status and the state refuses it with 409 `ILLEGAL_TRANSITION`. The partial unique index `ux_proposal_one_open_draft` also stops two concurrent "create revision" calls from producing two drafts.
@@ -104,15 +104,14 @@ Version 1 is the original submission, so versions 2, 3 and 4 are the three resub
 
 ### B5. Delivering notifications through channels
 
-1. Already in place: `notification/Notification.java`, `NotificationType.java`, `NotificationRepository.java`, `NotificationService.java` and migration `V4__notifications.sql` (columns in LLD section 9.6).
-2. `notification/NotificationChannel.java`: `String name(); void send(Notification notification);`
-3. `notification/InAppNotificationChannel.java` (`@Component`, saves the row) and `notification/EmailNotificationChannel.java` (`@Component`, logs only).
-4. `notification/NotificationService.java`: the constructor also takes `List<NotificationChannel>`; `create(...)` builds the `Notification` and calls `send` on every channel.
-5. `notification/NotificationListener.java`: `@TransactionalEventListener(phase = AFTER_COMMIT)` on `ProjectStatusChangedEvent`; maps ASSIGN_REVIEWER to the reviewer, APPROVE/REQUEST_REVISION/REJECT to the owner, resubmission to the reviewer.
-6. `notification/web/NotificationController.java` + `NotificationResponse.java`: `GET /api/notifications`, `PATCH /api/notifications/{id}/read`.
-7. Frontend: notification bell in `layouts/AppShell.tsx`, polling `GET /api/notifications` every 30 seconds with TanStack Query.
+How it works today (LLD section 6.1):
 
-**No existing workflow, project, proposal or review class changes.** A future channel (for example SMS) is one more `@Component` implementing `NotificationChannel`; Spring injects it into the list automatically. That is the live demonstration of Open/Closed.
+1. `notification/NotificationListener.java` is a `@TransactionalEventListener` (after commit, `REQUIRES_NEW`) on `ProjectStatusChangedEvent` and `ReviewRecordedEvent`: ASSIGN_REVIEWER notifies the reviewer, a SUBMIT out of REVISION_REQUESTED notifies the reviewer, every review decision notifies the student owner.
+2. It calls `NotificationDispatcher.dispatch`, which runs every channel named in `prastav.notification.enabled-channels`, each wrapped in `RetryingNotificationChannel`.
+3. `InAppNotificationChannel` stores the row through `NotificationService.create`; `EmailNotificationChannel` writes the email to the log.
+4. `notification/web/NotificationController.java` serves the caller's inbox: `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/{id}/read`, `PATCH /api/notifications/read-all`.
+
+To add a channel (for example SMS): one `@Component` implementing `NotificationChannel` with `name()` returning `sms`, then add `sms` to `NOTIFICATION_CHANNELS`. It is retried like the others. **No workflow, project, proposal, review or listener class changes.** That is the live demonstration of Open/Closed.
 
 ## Part C. Two-minute code walk for the demo
 
