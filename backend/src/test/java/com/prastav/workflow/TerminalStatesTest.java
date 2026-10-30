@@ -28,6 +28,8 @@ class TerminalStatesTest {
                             TestData.draft(project, 2, TestData.completeContent())));
             assertThrows(IllegalTransitionException.class,
                     () -> state.assignReviewer(project, TestData.faculty(), TestData.actor(TestData.coordinator())));
+            assertThrows(IllegalTransitionException.class,
+                    () -> state.reassignReviewer(project, TestData.faculty(), TestData.actor(TestData.coordinator())));
             assertThrows(IllegalTransitionException.class, () -> state.approve(project, TestData.actor(reviewer)));
             assertThrows(IllegalTransitionException.class,
                     () -> state.requestRevision(project, TestData.actor(reviewer), "x"));

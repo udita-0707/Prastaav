@@ -18,6 +18,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,7 +29,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 
-/** Project endpoints, including the two workflow actions triggered from the project page. HTTP only. */
+/** Project endpoints, including the workflow actions triggered from the project page. HTTP only. */
 @RestController
 @RequestMapping("/api/projects")
 @Tag(name = "Projects")
@@ -105,6 +106,17 @@ public class ProjectController {
     public ProjectDetailResponse assign(@PathVariable UUID id, @Valid @RequestBody AssignReviewerRequest request,
                                         @AuthenticationPrincipal Actor actor) {
         workflowService.assignReviewer(id, request.facultyId(), actor);
+        return ProjectMapper.toDetail(projectService.getProject(id, actor));
+    }
+
+    @PutMapping("/{id}/assign")
+    @PreAuthorize("hasRole('COORDINATOR')")
+    @Operation(summary = "Reassign the reviewer of a project under review",
+            description = "Only while the project is UNDER_REVIEW; any other status is ILLEGAL_TRANSITION. "
+                    + "The new reviewer must have the FACULTY role and differ from the current one.")
+    public ProjectDetailResponse reassign(@PathVariable UUID id, @Valid @RequestBody AssignReviewerRequest request,
+                                          @AuthenticationPrincipal Actor actor) {
+        workflowService.reassignReviewer(id, request.facultyId(), actor);
         return ProjectMapper.toDetail(projectService.getProject(id, actor));
     }
 

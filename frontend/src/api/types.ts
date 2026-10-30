@@ -16,6 +16,7 @@ export type Action =
   | 'APPROVE'
   | 'REQUEST_REVISION'
   | 'REJECT'
+  | 'REASSIGN_REVIEWER'
   | 'EDIT_DRAFT'
   | 'CREATE_REVISION';
 

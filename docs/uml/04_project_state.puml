@@ -9,13 +9,14 @@ SUBMITTED --> UNDER_REVIEW : assignReviewer\n[actor is COORDINATOR;\nassignee ha
 UNDER_REVIEW --> APPROVED : approve\n[actor is assigned faculty]
 UNDER_REVIEW --> REVISION_REQUESTED : requestRevision\n[assigned faculty;\ncomments mandatory]
 UNDER_REVIEW --> REJECTED : reject\n[assigned faculty;\ncomments mandatory]
+UNDER_REVIEW --> UNDER_REVIEW : reassignReviewer\n[actor is COORDINATOR;\nnew reviewer FACULTY,\nnot the current one]
 REVISION_REQUESTED --> UNDER_REVIEW : submit (resubmit)\n[owner; new version vN+1 open and complete;\nreviewer already assigned]
 APPROVED --> [*]
 REJECTED --> [*]
 
 state DRAFT : allowed: SUBMIT, EDIT_DRAFT
 state SUBMITTED : allowed: ASSIGN_REVIEWER
-state UNDER_REVIEW : allowed: APPROVE, REQUEST_REVISION, REJECT
+state UNDER_REVIEW : allowed: APPROVE, REQUEST_REVISION, REJECT,\nREASSIGN_REVIEWER
 state REVISION_REQUESTED : allowed: CREATE_REVISION, EDIT_DRAFT, SUBMIT
 state APPROVED : terminal
 state REJECTED : terminal

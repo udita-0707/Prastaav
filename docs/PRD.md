@@ -53,7 +53,7 @@ Product decisions: one assigned faculty reviewer per project; a REJECTED project
 | FR-14 | Compare two proposal versions of one project field by field: every proposal field with its value in each version and whether it changed; project participants only; a version outside the project is `NOT_FOUND`, the same version on both sides is `VALIDATION_FAILED` |
 | FR-15 | Coordinator dashboard: counts by status, pending-assignment list, reviewer workload |
 | FR-16 | Coordinator audit-log viewer with filters |
-| FR-17 | Reassign reviewer (with audit entry) |
+| FR-17 | Coordinator reassigns the reviewer of an UNDER\_REVIEW project to another FACULTY member; the status stays UNDER\_REVIEW; any other status is `ILLEGAL_TRANSITION`; a non-faculty or unchanged reviewer is `VALIDATION_FAILED`; an audit entry (`REVIEWER_REASSIGNED`) is written and both the previous and the new reviewer are notified |
 | FR-18 | Institution profile and email policy: every account uses the institutional domain (`nst.rishihood.edu.in`, configured in `application.yml`); self-registration creates STUDENT accounts only and requires `<firstname>.<YY><branch>@domain`, from which admission year (2000 + YY) and branch are stored; FACULTY and COORDINATOR accounts are created by the coordinator (`POST /api/users`) or the seed; any other email or role is rejected with `VALIDATION_FAILED` |
 
 ### 1.6 Workflow
@@ -67,6 +67,7 @@ Statuses: `DRAFT`, `SUBMITTED`, `UNDER_REVIEW`, `REVISION_REQUESTED`, `APPROVED`
 | UNDER\_REVIEW | approve | Assigned faculty | APPROVED | reviewing latest submitted version |
 | UNDER\_REVIEW | requestRevision | Assigned faculty | REVISION\_REQUESTED | comments mandatory |
 | UNDER\_REVIEW | reject | Assigned faculty | REJECTED | comments mandatory |
+| UNDER\_REVIEW | reassignReviewer | Coordinator | UNDER\_REVIEW (unchanged) | new reviewer has FACULTY role and is not the current reviewer |
 | REVISION\_REQUESTED | submit (resubmit) | Student (owner) | UNDER\_REVIEW | new version exists, reviewer already assigned |
 
 APPROVED and REJECTED are terminal. Anything not in the table is illegal.
@@ -79,6 +80,7 @@ stateDiagram-v2
     UNDER_REVIEW --> APPROVED: approve
     UNDER_REVIEW --> REJECTED: reject
     UNDER_REVIEW --> REVISION_REQUESTED: requestRevision
+    UNDER_REVIEW --> UNDER_REVIEW: reassignReviewer
     REVISION_REQUESTED --> UNDER_REVIEW: resubmit
     APPROVED --> [*]
     REJECTED --> [*]
@@ -151,9 +153,9 @@ com.prastav
 
 **reviews** — id, project\_id (FK), proposal\_version\_id (FK), reviewer\_id (FK users), decision (APPROVE/REQUEST\_REVISION/REJECT), comments, created\_at
 
-**audit\_logs** — id, project\_id (nullable FK), actor\_id, action (PROJECT\_CREATED, PROPOSAL\_SUBMITTED, REVIEWER\_ASSIGNED, REVIEW\_RECORDED, STATUS\_CHANGED, …), from\_status, to\_status, details (JSON text), created\_at — append-only
+**audit\_logs** — id, project\_id (nullable FK), actor\_id, action (PROJECT\_CREATED, PROPOSAL\_SUBMITTED, REVIEWER\_ASSIGNED, REVIEWER\_REASSIGNED, REVIEW\_RECORDED, STATUS\_CHANGED, …), from\_status, to\_status, details (JSON text), created\_at — append-only
 
-**notifications** — id, recipient\_id (FK users), project\_id (nullable FK projects), type (REVIEWER\_ASSIGNED/REVIEW\_DECISION/RESUBMITTED), message, is\_read, created\_at; indexes (recipient\_id, is\_read) and (recipient\_id, created\_at)
+**notifications** — id, recipient\_id (FK users), project\_id (nullable FK projects), type (REVIEWER\_ASSIGNED/REVIEWER\_UNASSIGNED/REVIEW\_DECISION/RESUBMITTED), message, is\_read, created\_at; indexes (recipient\_id, is\_read) and (recipient\_id, created\_at)
 
 Relationships: User 1—\* Project (owner); User 1—\* Project (reviewer); Project 1—\* ProposalVersion; ProposalVersion 1—\* Review; Project 1—\* AuditLog; User 1—\* Notification (recipient); Project 0..1—\* Notification.
 
@@ -191,7 +193,7 @@ public class DraftState implements ProjectState {
 | Pattern | Where | Why |
 | --- | --- | --- |
 | State | `workflow` module | Replaces status if/else chains; legal transitions per state |
-| Observer (Spring events) | `ProjectStatusChangedEvent`, `ReviewRecordedEvent` → `AuditEventListener` and `NotificationListener` | Audit and notifications decoupled from workflow |
+| Observer (Spring events) | `ProjectStatusChangedEvent`, `ReviewerReassignedEvent`, `ReviewRecordedEvent` → `AuditEventListener` and `NotificationListener` | Audit and notifications decoupled from workflow |
 | Factory | `ProjectStateFactory`, `ProposalVersionFactory` (new version from previous) | Centralized object creation |
 | Strategy | `ReviewDecisionHandler` per decision (Approve/Revise/Reject); `EmailPolicy` / `PatternEmailPolicy` for account emails; `NotificationChannel` (in-app, email log) run by `NotificationDispatcher` | Add behaviour without modifying services |
 | Decorator | `RetryingNotificationChannel` around every enabled `NotificationChannel` | Retries without changing any channel |
@@ -230,6 +232,7 @@ Base path `/api`. All except auth require `Authorization: Bearer <jwt>`.
 | GET | /projects/{id}/proposals/compare?from=&to= | participants | Field-by-field comparison of two versions (FR-14) |
 | POST | /projects/{id}/submit | STUDENT (owner) | Submit / resubmit (state decides) |
 | POST | /projects/{id}/assign | COORDINATOR | Body: facultyId |
+| PUT | /projects/{id}/assign | COORDINATOR | Body: facultyId; reassign the reviewer while UNDER\_REVIEW (FR-17) |
 | POST | /projects/{id}/reviews | FACULTY (assigned) | Body: decision, comments |
 | GET | /projects/{id}/reviews | participants | Review history |
 | GET | /projects/{id}/history | participants | Merged timeline (versions + reviews + status changes) |

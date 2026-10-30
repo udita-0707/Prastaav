@@ -17,11 +17,12 @@
 - See the projects assigned to you, with counts of pending reviews and projects awaiting student changes.
 - Review the latest submitted version: approve, request changes or reject. Comments are required for the last two.
 - A "Reviews" list shows what waits for your decision, the longest-waiting first.
-- Get a notification when a project is assigned to you and when a student resubmits it.
+- Get a notification when a project is assigned to you, when a student resubmits it, and when the coordinator moves a review to or away from you.
 
 **Coordinator**
 - See every project with counts by status, search, status and faculty filters, a batch filter (admission year and branch of the project owner), sorting and paging.
 - Assign a faculty reviewer to submitted projects from the "Assign Faculty" page, from any list row or from the project page.
+- Hand a project under review to another faculty member through `PUT /api/projects/{id}/assign`; the change is audited and both reviewers are notified.
 - Follow every review in progress from the "Reviews" list.
 - Create faculty and coordinator accounts on the institutional domain through `POST /api/users`.
 
@@ -168,6 +169,7 @@ Base path `/api`; every endpoint except register, login and Swagger needs `Autho
 | GET | `/projects/{id}/proposals/compare?from=&to=` | participant | Field-by-field comparison of two versions: `{ fromVersion, toVersion, fields: [{ name, fromValue, toValue, changed }] }`; a version outside the project gives `404 NOT_FOUND`, the same version twice `400 VALIDATION_FAILED` |
 | POST | `/projects/{id}/submit` | student owner | Submit or resubmit |
 | POST | `/projects/{id}/assign` | coordinator | Assign a faculty reviewer |
+| PUT | `/projects/{id}/assign` | coordinator | Reassign the reviewer while the project is `UNDER_REVIEW` (body `{ facultyId }`); another status gives `409 ILLEGAL_TRANSITION`, a non-faculty or unchanged reviewer `400 VALIDATION_FAILED` |
 | POST / GET | `/projects/{id}/reviews` | assigned faculty / participant | Record a decision / list reviews |
 | GET | `/projects/{id}/history` | participant | Timeline of versions, reviews and status changes |
 | GET | `/notifications` | any (own) | The caller's notifications, newest first; optional `unread=true`, `page` (from 0), `size` (1 to 50, default 10); returns `{ content, page, size, totalElements, totalPages }` |
@@ -222,7 +224,7 @@ cd frontend && npm run typecheck           # TypeScript type check
 cd frontend && npm run build               # type check and production build
 ```
 
-Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService`, `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery` (paging defaults and bounds), `ProjectSpecifications` (role scope and filters), the audit listener, `PatternEmailPolicy` (with the shipped configuration), registration in `AuthService`, account creation in `UserService` and `NotificationService` (inbox scoping, paging bounds, unread count, read ownership), `NotificationListener` (who is notified for an assignment, a resubmission and each review decision, and that other status changes notify nobody), `NotificationDispatcher` (enabled channels in order, a failing channel does not stop the others, disabled channels skipped), `RetryingNotificationChannel` (no retry on success, success on a later attempt, gives up after max attempts) and the in-app and email channels. `UserControllerWebTest` checks the coordinator-only `POST /api/users`. `NotificationControllerWebTest` checks that every role reaches only its own inbox, the paging parameters and envelope, and the 400, 401, 403 and 404 responses. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters, the page envelope, invalid list parameters and the summary endpoint.
+Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService` (including reviewer reassignment: allowed, wrong state, wrong role, same reviewer, event published), `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `ProjectListQuery` (paging defaults and bounds), `ProjectSpecifications` (role scope and filters), the audit listener (including the reassignment entry), `PatternEmailPolicy` (with the shipped configuration), registration in `AuthService`, account creation in `UserService` and `NotificationService` (inbox scoping, paging bounds, unread count, read ownership), `NotificationListener` (who is notified for an assignment, a resubmission, a reassignment and each review decision, and that other status changes notify nobody), `NotificationDispatcher` (enabled channels in order, a failing channel does not stop the others, disabled channels skipped), `RetryingNotificationChannel` (no retry on success, success on a later attempt, gives up after max attempts) and the in-app and email channels. `UserControllerWebTest` checks the coordinator-only `POST /api/users`. `NotificationControllerWebTest` checks that every role reaches only its own inbox, the paging parameters and envelope, and the 400, 401, 403 and 404 responses. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters, the page envelope, invalid list parameters, the summary endpoint and the coordinator-only reassignment.
 
 ## Design patterns
 

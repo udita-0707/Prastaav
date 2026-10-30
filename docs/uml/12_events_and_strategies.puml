@@ -9,6 +9,7 @@ package "Observer: events" {
   class ProposalDraftUpdatedEvent <<record>>
   class ProjectStatusChangedEvent <<record>>
   class ReviewRecordedEvent <<record>>
+  class ReviewerReassignedEvent <<record>>
 
   class AuditEventListener {
     - recorder : AuditRecorder
@@ -17,6 +18,7 @@ package "Observer: events" {
     + on(event : ProposalVersionCreatedEvent)
     + on(event : ProposalDraftUpdatedEvent)
     + on(event : ProjectStatusChangedEvent)
+    + on(event : ReviewerReassignedEvent)
     + on(event : ReviewRecordedEvent)
   }
   interface AuditRecorder {
@@ -32,11 +34,14 @@ AuditEventListener ..> ProposalVersionCreatedEvent
 AuditEventListener ..> ProposalDraftUpdatedEvent
 AuditEventListener ..> ProjectStatusChangedEvent
 AuditEventListener ..> ReviewRecordedEvent
+AuditEventListener ..> ReviewerReassignedEvent
 
 class NotificationListener {
   - projectStore : ProjectStore
+  - userService : UserService
   - dispatcher : NotificationDispatcher
   + on(event : ProjectStatusChangedEvent)
+  + on(event : ReviewerReassignedEvent)
   + on(event : ReviewRecordedEvent)
 }
 note right of NotificationListener
@@ -45,9 +50,11 @@ note right of NotificationListener
   ASSIGN_REVIEWER -> reviewer
   SUBMIT from REVISION_REQUESTED -> reviewer
   review decision -> owner
+  reassignment -> previous and new reviewer
 end note
 NotificationListener ..> ProjectStatusChangedEvent
 NotificationListener ..> ReviewRecordedEvent
+NotificationListener ..> ReviewerReassignedEvent
 NotificationListener --> NotificationDispatcher : dispatch()
 
 package "Strategy: review decisions" {

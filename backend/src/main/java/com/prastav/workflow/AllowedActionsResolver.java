@@ -37,7 +37,7 @@ public class AllowedActionsResolver {
         return switch (action) {
             case SUBMIT, EDIT_DRAFT -> owner && hasOpenDraft;
             case CREATE_REVISION -> owner && !hasOpenDraft;
-            case ASSIGN_REVIEWER -> actor.hasRole(Role.COORDINATOR);
+            case ASSIGN_REVIEWER, REASSIGN_REVIEWER -> actor.hasRole(Role.COORDINATOR);
             case APPROVE, REQUEST_REVISION, REJECT ->
                     actor.hasRole(Role.FACULTY) && project.isReviewedBy(actor.userId());
         };

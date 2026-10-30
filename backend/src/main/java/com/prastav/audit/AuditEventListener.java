@@ -9,6 +9,7 @@ import com.prastav.review.ReviewRecordedEvent;
 import com.prastav.workflow.Action;
 import com.prastav.workflow.ProjectStatus;
 import com.prastav.workflow.ProjectStatusChangedEvent;
+import com.prastav.workflow.ReviewerReassignedEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
@@ -75,6 +76,18 @@ public class AuditEventListener {
                 .fromStatus(event.fromStatus())
                 .toStatus(event.toStatus())
                 .details(toJson(details))
+                .build());
+    }
+
+    @EventListener
+    public void on(ReviewerReassignedEvent event) {
+        recorder.record(AuditLog.builder()
+                .projectId(event.projectId())
+                .actorId(event.actorId())
+                .action(AuditAction.REVIEWER_REASSIGNED)
+                .details(toJson(Map.of(
+                        "previousReviewerId", event.previousReviewerId().toString(),
+                        "reviewerId", event.newReviewerId().toString())))
                 .build());
     }
 

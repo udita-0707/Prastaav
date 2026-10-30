@@ -13,7 +13,7 @@ rectangle "Prastav" {
   usecase "Submit / resubmit proposal" as UC4
   usecase "View feedback and history" as UC5
   usecase "Create revision vN+1" as UC6
-  usecase "Assign faculty reviewer" as UC7
+  usecase "Assign or reassign faculty reviewer" as UC7
   usecase "Review latest submitted version\n(approve / request revision / reject)" as UC8
   usecase "View project timeline" as UC9
   usecase "View all projects" as UC10

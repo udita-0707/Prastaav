@@ -1,6 +1,8 @@
 package com.prastav.notification;
 
+import com.prastav.auth.Role;
 import com.prastav.auth.User;
+import com.prastav.auth.UserService;
 import com.prastav.project.Project;
 import com.prastav.project.ProjectStore;
 import com.prastav.review.ReviewDecision;
@@ -9,18 +11,21 @@ import com.prastav.support.TestData;
 import com.prastav.workflow.Action;
 import com.prastav.workflow.ProjectStatus;
 import com.prastav.workflow.ProjectStatusChangedEvent;
+import com.prastav.workflow.ReviewerReassignedEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -28,6 +33,7 @@ import static org.mockito.Mockito.when;
 class NotificationListenerTest {
 
     private ProjectStore projectStore;
+    private UserService userService;
     private NotificationDispatcher dispatcher;
     private NotificationListener listener;
 
@@ -38,8 +44,9 @@ class NotificationListenerTest {
     @BeforeEach
     void setUp() {
         projectStore = mock(ProjectStore.class);
+        userService = mock(UserService.class);
         dispatcher = mock(NotificationDispatcher.class);
-        listener = new NotificationListener(projectStore, dispatcher);
+        listener = new NotificationListener(projectStore, userService, dispatcher);
     }
 
     @Test
@@ -104,6 +111,27 @@ class NotificationListenerTest {
         assertSame(project, sent.getProject());
         assertEquals(NotificationType.REVIEW_DECISION, sent.getType());
         assertEquals(message, sent.getMessage());
+    }
+
+    @Test
+    void reassignmentNotifiesThePreviousAndTheNewReviewer() {
+        User newReviewer = new User("Dr. Vikram Shah", "vikram.shah@prastav.edu", "hash", Role.FACULTY);
+        Project project = TestData.projectIn(ProjectStatus.UNDER_REVIEW, student, newReviewer);
+        when(projectStore.getById(project.getId())).thenReturn(project);
+        when(userService.getById(faculty.getId())).thenReturn(faculty);
+
+        listener.on(new ReviewerReassignedEvent(project.getId(), coordinator.getId(), faculty.getId(),
+                newReviewer.getId()));
+
+        ArgumentCaptor<Notification> captor = ArgumentCaptor.forClass(Notification.class);
+        verify(dispatcher, times(2)).dispatch(captor.capture());
+        List<Notification> sent = captor.getAllValues();
+        assertSame(faculty, sent.get(0).getRecipient());
+        assertEquals(NotificationType.REVIEWER_UNASSIGNED, sent.get(0).getType());
+        assertEquals("You are no longer the reviewer of \"Smart Attendance\"", sent.get(0).getMessage());
+        assertSame(newReviewer, sent.get(1).getRecipient());
+        assertEquals(NotificationType.REVIEWER_ASSIGNED, sent.get(1).getType());
+        assertEquals("You have been assigned to review \"Smart Attendance\"", sent.get(1).getMessage());
     }
 
     private Project stored(ProjectStatus status) {

@@ -16,12 +16,13 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
- * <b>Facade pattern.</b> The single entry point for every status change:
+ * <b>Facade pattern.</b> The single entry point for every status change and reviewer change:
  * load project, get its state from {@link ProjectStateFactory}, run the action, save, publish
- * {@link ProjectStatusChangedEvent}. Controllers and other services never set a status themselves.
+ * {@link ProjectStatusChangedEvent} (or {@link ReviewerReassignedEvent} for a reassignment, which keeps
+ * the status). Controllers and other services never set a status or a reviewer themselves.
  * <p>
- * Why: callers see five simple methods instead of coordinating states, repositories and events,
- * and every transition goes through the same audited path in one transaction.
+ * Why: callers see six simple methods instead of coordinating states, repositories and events,
+ * and every change goes through the same audited path in one transaction.
  */
 @Service
 public class WorkflowService {
@@ -60,6 +61,19 @@ public class WorkflowService {
         return transition(project, actor, Action.ASSIGN_REVIEWER,
                 state -> state.assignReviewer(project, faculty, actor),
                 Map.of("reviewerId", faculty.getId().toString(), "reviewerName", faculty.getName()));
+    }
+
+    /** Hands an UNDER_REVIEW project to another faculty member; the state checks role, assignee and status. */
+    @Transactional
+    public Project reassignReviewer(UUID projectId, UUID facultyId, Actor actor) {
+        Project project = projectStore.getById(projectId);
+        User faculty = userService.getById(facultyId);
+        User previous = project.getReviewer();
+        stateFactory.stateOf(project.getStatus()).reassignReviewer(project, faculty, actor);
+        Project saved = projectStore.save(project);
+        events.publishEvent(new ReviewerReassignedEvent(
+                saved.getId(), actor.userId(), previous.getId(), faculty.getId()));
+        return saved;
     }
 
     @Transactional
