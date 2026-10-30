@@ -55,6 +55,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-11 | Project timeline | `ProjectHistoryService`, `GET /api/projects/{id}/history`, Timeline tab of the project page |
 | FR-12 | Role-scoped lists with status filter, search, coordinator batch filter, pagination | `ProjectService.listProjects`, `ProjectListQuery`, `ProjectSpecifications`, `GET /api/projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size=` |
 | FR-13 | Notifications on reviewer assignment (to the faculty member), review decision (to the student owner) and resubmission (to the faculty member), stored per recipient with a read flag; paged inbox with unread filter, unread count, mark one or all read, each scoped to the caller; delivery through the configured channels (in-app, email log) | `NotificationListener`, `NotificationDispatcher`, `NotificationChannel`, `Notification`, `NotificationRepository`, `NotificationService`, `NotificationController`, `NotificationMapper`, `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/{id}/read`, `PATCH /api/notifications/read-all`, `V4__notifications.sql` |
+| FR-17 | Coordinator reassigns the reviewer of an UNDER_REVIEW project (status unchanged); the new reviewer must be FACULTY and differ from the current one; any other status is ILLEGAL_TRANSITION; audited and both reviewers notified | `PUT /api/projects/{id}/assign`, `WorkflowService.reassignReviewer`, `UnderReviewState.reassignReviewer`, `ReviewerReassignedEvent`, `AuditEventListener` (`REVIEWER_REASSIGNED`), `NotificationListener`, `V5__notification_reviewer_unassigned.sql` |
 | FR-14 | Compare two proposal versions field by field | `ProposalDiffService`, `ProposalDiff`, `FieldDiff`, `ProposalVersionRepository.findByProject_IdAndVersionNumber`, `GET /api/projects/{id}/proposals/compare?from=&to=` |
 | FR-15 | Role dashboards: counts per status and projects awaiting assignment | `ProjectService.countProjects`, `GET /api/projects/summary`, web app home pages |
 | FR-18 | Institution profile and email policy: institutional domain for every account; student-only registration with `<firstname>.<YY><branch>@domain`, storing admission year and branch; staff accounts created by the coordinator | `InstitutionProperties`, `EmailPolicy`, `PatternEmailPolicy`, `AuthService.register`, `UserService.createAccount`, `POST /api/users`, `V3__user_institution_profile.sql` |
@@ -63,13 +64,13 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 
 | Item | Evidence |
 |---|---|
-| Flyway schema with constraints and triggers | `backend/src/main/resources/db/migration/V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql` |
+| Flyway schema with constraints and triggers | `backend/src/main/resources/db/migration/V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`, `V5__notification_reviewer_unassigned.sql` |
 | Seed data (1 coordinator, 2 faculty, 3 students on `nst.rishihood.edu.in`, one shared `prastav.seed.demo-password`) | `DemoDataSeeder` |
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries | 181 tests in `backend/src/test/java` (see section 16) |
-| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, account creation, notification inbox) | `ProjectControllerWebTest` (15 tests), `ProposalControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests), `NotificationControllerWebTest` (12 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment | 200 tests in `backend/src/test/java` (see section 16) |
+| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, account creation, notification inbox) | `ProjectControllerWebTest` (20 tests), `ProposalControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests), `NotificationControllerWebTest` (12 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
 
@@ -129,7 +130,7 @@ com.prastav
 ├─ workflow    ProjectStatus, Action, ProjectState, DraftState, SubmittedState,
 │              UnderReviewState, RevisionRequestedState, ApprovedState, RejectedState,
 │              ProjectStateFactory, Guards, AllowedActionsResolver, IllegalTransitionException,
-│              ProjectStatusChangedEvent, WorkflowService
+│              ProjectStatusChangedEvent, ReviewerReassignedEvent, WorkflowService
 ├─ project     Project, ProjectRepository, ProjectStore, ProjectAccessPolicy, ProjectService,
 │              NewProject, ProjectView, ProjectCreatedEvent, ProjectHistoryService,
 │              TimelineEntry, TimelineEntryType, ProjectListQuery, ProjectListItem,
@@ -165,9 +166,10 @@ com.prastav
 | UNDER_REVIEW | `approve` | Assigned faculty | APPROVED | actor is the assigned reviewer (`UnderReviewState.approve`); review is stored against the latest submitted version (`ReviewService`) |
 | UNDER_REVIEW | `requestRevision` | Assigned faculty | REVISION_REQUESTED | assigned reviewer; comments mandatory |
 | UNDER_REVIEW | `reject` | Assigned faculty | REJECTED | assigned reviewer; comments mandatory |
+| UNDER_REVIEW | `reassignReviewer` | Coordinator | UNDER_REVIEW (unchanged) | actor is COORDINATOR (403); new reviewer has FACULTY role (400); new reviewer differs from the current one (400) (`UnderReviewState.reassignReviewer`) |
 | REVISION_REQUESTED | `submit` (resubmit) | Student owner | UNDER_REVIEW | owner; new version is open and complete; reviewer already assigned (`RevisionRequestedState.submit`) |
 
-APPROVED and REJECTED are terminal. Any pair not in this table throws `IllegalTransitionException` and returns HTTP 409 `ILLEGAL_TRANSITION`.
+APPROVED and REJECTED are terminal. Any pair not in this table throws `IllegalTransitionException` and returns HTTP 409 `ILLEGAL_TRANSITION`; for example reassigning while SUBMITTED gives "Action REASSIGN_REVIEWER is not allowed while the project is SUBMITTED" (a SUBMITTED project has no reviewer yet and uses `assignReviewer`).
 
 ![Project state machine](uml/png/04_project_state.png)
 
@@ -175,13 +177,13 @@ APPROVED and REJECTED are terminal. Any pair not in this table throws `IllegalTr
 
 ![Workflow State pattern](uml/png/03_workflow_state_pattern.png)
 
-`ProjectState` declares five transition methods as **default methods that throw** `IllegalTransitionException(status(), action)`. Each concrete state overrides only what is legal from it:
+`ProjectState` declares six action methods (`submit`, `assignReviewer`, `reassignReviewer`, `approve`, `requestRevision`, `reject`) as **default methods that throw** `IllegalTransitionException(status(), action)`. Each concrete state overrides only what is legal from it:
 
 | State class | Overrides | `availableActions()` |
 |---|---|---|
 | `DraftState` | `submit` | SUBMIT, EDIT_DRAFT |
 | `SubmittedState` | `assignReviewer` | ASSIGN_REVIEWER |
-| `UnderReviewState` | `approve`, `requestRevision`, `reject` | APPROVE, REQUEST_REVISION, REJECT |
+| `UnderReviewState` | `approve`, `requestRevision`, `reject`, `reassignReviewer` | APPROVE, REQUEST_REVISION, REJECT, REASSIGN_REVIEWER |
 | `RevisionRequestedState` | `submit` (resubmit) | CREATE_REVISION, EDIT_DRAFT, SUBMIT |
 | `ApprovedState` | nothing (terminal) | none |
 | `RejectedState` | nothing (terminal) | none |
@@ -204,6 +206,13 @@ Every public method (`submit`, `assignReviewer`, `approve`, `requestRevision`, `
 
 If step 3 throws, steps 4 and 5 never run and the transaction rolls back, so an illegal action leaves no trace except the error response.
 
+`reassignReviewer(projectId, facultyId, actor)` is also `@Transactional` and takes the same path, but does not use `transition` because the status does not change:
+
+1. Load the project (`ProjectStore.getById`, 404) and the new reviewer (`UserService.getById`, 404); remember the current reviewer.
+2. `stateFactory.stateOf(status).reassignReviewer(project, faculty, actor)`. Only `UnderReviewState` overrides it; every other state throws `IllegalTransitionException(status, REASSIGN_REVIEWER)` (409). `UnderReviewState` checks the COORDINATOR role (403), the FACULTY role of the new reviewer (400) and that it is not the current reviewer (400), then calls `Project.assignReviewer`.
+3. `projectStore.save(project)` (optimistic lock as above).
+4. Publish `ReviewerReassignedEvent(projectId, actorId, previousReviewerId, newReviewerId)`. It is not a `ProjectStatusChangedEvent`, since from and to would be the same status.
+
 ### 5.4 `allowedActions`
 
 `AllowedActionsResolver.resolve(project, actor, hasOpenDraft)` starts from `stateOf(status).availableActions()` and keeps an action only if this actor may perform it:
@@ -212,7 +221,7 @@ If step 3 throws, steps 4 and 5 never run and the transaction rolls back, so an 
 |---|---|
 | SUBMIT, EDIT_DRAFT | actor owns the project and an open draft exists |
 | CREATE_REVISION | actor owns the project and no open draft exists |
-| ASSIGN_REVIEWER | actor is COORDINATOR |
+| ASSIGN_REVIEWER, REASSIGN_REVIEWER | actor is COORDINATOR |
 | APPROVE, REQUEST_REVISION, REJECT | actor is FACULTY and the assigned reviewer |
 
 The UI renders buttons only from this list. The backend still re-checks every action, so a hand-crafted request gets the same 403/409 as before.
@@ -230,18 +239,23 @@ Publishers use Spring's `ApplicationEventPublisher`. `AuditEventListener` uses `
 | `ProposalDraftUpdatedEvent` | `ProposalService.updateDraft` | projectId, versionNumber, actorId | `DRAFT_UPDATED` |
 | `ProjectStatusChangedEvent` | `WorkflowService` (every transition) | projectId, actorId, action, fromStatus, toStatus, details | `PROPOSAL_SUBMITTED` (SUBMIT), `REVIEWER_ASSIGNED` (ASSIGN_REVIEWER), otherwise `STATUS_CHANGED`; from/to filled |
 | `ReviewRecordedEvent` | `ReviewService.recordReview` | projectId, reviewId, versionNumber, reviewerId, decision | `REVIEW_RECORDED` |
+| `ReviewerReassignedEvent` | `WorkflowService.reassignReviewer` | projectId, actorId, previousReviewerId, newReviewerId | `REVIEWER_REASSIGNED`, from/to empty (the status does not change, so the entry is not a timeline status change); details `{"previousReviewerId":"...","reviewerId":"..."}` |
 
 `AuditEventListener` depends on the one-method `AuditRecorder` interface (implemented by `JpaAuditRecorder`), not on a repository. `details` is a small JSON object built with Jackson, e.g. `{"versionNumber":"2","action":"SUBMIT"}`.
 
 ### 6.1 Notification dispatch
 
-`NotificationListener` turns three of these events into notifications. It never adds an event of its own: assignment and resubmission are already `ProjectStatusChangedEvent`s, and a decision is a `ReviewRecordedEvent`.
+`NotificationListener` turns four of these events into notifications. Assignment and resubmission are `ProjectStatusChangedEvent`s, a decision is a `ReviewRecordedEvent` and a reassignment is a `ReviewerReassignedEvent`.
 
 | Event | Condition | Recipient | `NotificationType` | Message |
 |---|---|---|---|---|
 | `ProjectStatusChangedEvent` | `action == ASSIGN_REVIEWER` | the assigned reviewer (`Project.getReviewer()`) | `REVIEWER_ASSIGNED` | `You have been assigned to review "<title>"` |
 | `ProjectStatusChangedEvent` | `action == SUBMIT` and `fromStatus == REVISION_REQUESTED` | the assigned reviewer | `RESUBMITTED` | `"<title>" was resubmitted as version <details.versionNumber>` |
 | `ReviewRecordedEvent` | every decision | the student owner (`Project.getOwner()`) | `REVIEW_DECISION` | `Version <n> of "<title>" was approved` / `needs changes` / `was rejected` |
+| `ReviewerReassignedEvent` | always | the previous reviewer (`UserService.getById(previousReviewerId)`) | `REVIEWER_UNASSIGNED` | `You are no longer the reviewer of "<title>"` |
+| `ReviewerReassignedEvent` | always | the new reviewer (`Project.getReviewer()`) | `REVIEWER_ASSIGNED` | `You have been assigned to review "<title>"` |
+
+After a reassignment the previous reviewer is no longer a participant, so the project itself returns 403 to them; the notification still names the project and stays in their inbox.
 
 Every other status change (first submission, and the APPROVE, REQUEST_REVISION and REJECT transitions, whose decision arrives as `ReviewRecordedEvent`) is ignored, so a decision produces exactly one notification.
 
@@ -797,9 +811,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 *enum* · `src/main/java/com/prastav/workflow/Action.java`
 
-**Responsibility.** Everything a user can do to a project. The first five are status transitions handled by ProjectState; EDIT_DRAFT and CREATE_REVISION are proposal operations whose availability still depends on the status, so each state lists them too. The UI shows buttons from this list.
+**Responsibility.** Everything a user can do to a project. The first five are status transitions handled by ProjectState; REASSIGN_REVIEWER is also handled by ProjectState but keeps the status; EDIT_DRAFT and CREATE_REVISION are proposal operations whose availability still depends on the status, so each state lists them too. The UI shows buttons from this list.
 
-**Constants:** `SUBMIT`, `ASSIGN_REVIEWER`, `APPROVE`, `REQUEST_REVISION`, `REJECT`, `EDIT_DRAFT`, `CREATE_REVISION`
+**Constants:** `SUBMIT`, `ASSIGN_REVIEWER`, `APPROVE`, `REQUEST_REVISION`, `REJECT`, `REASSIGN_REVIEWER`, `EDIT_DRAFT`, `CREATE_REVISION`
 
 #### `AllowedActionsResolver`
 
@@ -883,6 +897,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `Set<Action> availableActions()`
 - `default void submit(Project project, Actor actor, ProposalVersion draft)`
 - `default void assignReviewer(Project project, User faculty, Actor actor)`
+- `default void reassignReviewer(Project project, User faculty, Actor actor)`: replaces the assigned reviewer without changing the status
 - `default void approve(Project project, Actor actor)`
 - `default void requestRevision(Project project, Actor actor, String comments)`
 - `default void reject(Project project, Actor actor, String comments)`
@@ -921,6 +936,14 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Responsibility.** Observer pattern event, published by WorkflowService after every successful transition. The workflow does not know who listens (AuditEventListener, NotificationListener).
 
 **Components:** `UUID projectId, UUID actorId, Action action, ProjectStatus fromStatus, ProjectStatus toStatus, Map<String, String> details`
+
+#### `ReviewerReassignedEvent`
+
+*record* · `src/main/java/com/prastav/workflow/ReviewerReassignedEvent.java`
+
+**Responsibility.** Observer pattern event, published by WorkflowService.reassignReviewer after the coordinator replaced the reviewer of an UNDER_REVIEW project. The status does not change, so this is not a ProjectStatusChangedEvent; listeners audit it and notify both reviewers.
+
+**Components:** `UUID projectId, UUID actorId, UUID previousReviewerId, UUID newReviewerId`
 
 #### `RejectedState`
 
@@ -961,7 +984,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 *class* `implements ProjectState` · @Component · `src/main/java/com/prastav/workflow/UnderReviewState.java`
 
-**Responsibility.** State pattern: UNDER_REVIEW. Only the assigned faculty member may decide. Requesting a revision or rejecting requires comments; approving does not.
+**Responsibility.** State pattern: UNDER_REVIEW. Only the assigned faculty member may decide. Requesting a revision or rejecting requires comments; approving does not. The coordinator may hand the review to another faculty member, which keeps the status.
 
 **Methods:**
 
@@ -970,12 +993,13 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public void approve(Project project, Actor actor)`
 - `public void requestRevision(Project project, Actor actor, String comments)`
 - `public void reject(Project project, Actor actor, String comments)`
+- `public void reassignReviewer(Project project, User faculty, Actor actor)`: COORDINATOR only (403); ValidationException (400) when the new reviewer is not FACULTY or is already the assigned reviewer; then `Project.assignReviewer`
 
 #### `WorkflowService`
 
 *class* · @Service · `src/main/java/com/prastav/workflow/WorkflowService.java`
 
-**Responsibility.** Facade pattern. The single entry point for every status change: load project, get its state from ProjectStateFactory, run the action, save, publish ProjectStatusChangedEvent. Controllers and other services never set a status themselves. Why: callers see five simple methods instead of coordinating states, repositories and events, and every transition goes through the same audited path in one transaction.
+**Responsibility.** Facade pattern. The single entry point for every status change and reviewer change: load project, get its state from ProjectStateFactory, run the action, save, publish ProjectStatusChangedEvent (or ReviewerReassignedEvent for a reassignment, which keeps the status). Controllers and other services never set a status or a reviewer themselves. Why: callers see six simple methods instead of coordinating states, repositories and events, and every change goes through the same audited path in one transaction.
 
 | Field | Type | Visibility |
 |---|---|---|
@@ -990,6 +1014,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public WorkflowService(ProjectStore projectStore, ProjectStateFactory stateFactory, ProposalService proposalService, UserService userService, ApplicationEventPublisher events)`
 - `public Project submit(UUID projectId, Actor actor)`
 - `public Project assignReviewer(UUID projectId, UUID facultyId, Actor actor)`
+- `public Project reassignReviewer(UUID projectId, UUID facultyId, Actor actor)`: hands an UNDER_REVIEW project to another faculty member and publishes ReviewerReassignedEvent
 - `public Project approve(UUID projectId, Actor actor)`
 - `public Project requestRevision(UUID projectId, Actor actor, String comments)`
 - `public Project reject(UUID projectId, Actor actor, String comments)`
@@ -1235,7 +1260,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 *record* · `src/main/java/com/prastav/project/web/AssignReviewerRequest.java`
 
-**Responsibility.** Body of POST /api/projects/{id}/assign.
+**Responsibility.** Body of POST /api/projects/{id}/assign (assign) and PUT /api/projects/{id}/assign (reassign).
 
 **Components:** `UUID facultyId`
 
@@ -1256,7 +1281,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 *class* · @RestController · `src/main/java/com/prastav/project/web/ProjectController.java`
 
-**Responsibility.** Project endpoints, including the two workflow actions triggered from the project page. HTTP only.
+**Responsibility.** Project endpoints, including the workflow actions triggered from the project page. HTTP only.
 
 | Field | Type | Visibility |
 |---|---|---|
@@ -1273,6 +1298,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ProjectDetailResponse get(UUID id, Actor actor)`
 - `public ProjectDetailResponse submit(UUID id, Actor actor)`
 - `public ProjectDetailResponse assign(UUID id, AssignReviewerRequest request, Actor actor)`
+- `public ProjectDetailResponse reassign(UUID id, AssignReviewerRequest request, Actor actor)`: `PUT /{id}/assign`, COORDINATOR only
 - `public List<TimelineEntry> history(UUID id, Actor actor)`
 
 #### `ProjectCountsResponse`
@@ -1725,7 +1751,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Responsibility.** What happened, as recorded in audit_logs.action.
 
-**Constants:** `PROJECT_CREATED`, `VERSION_CREATED`, `DRAFT_UPDATED`, `PROPOSAL_SUBMITTED`, `REVIEWER_ASSIGNED`, `REVIEW_RECORDED`, `STATUS_CHANGED`
+**Constants:** `PROJECT_CREATED`, `VERSION_CREATED`, `DRAFT_UPDATED`, `PROPOSAL_SUBMITTED`, `REVIEWER_ASSIGNED`, `REVIEWER_REASSIGNED`, `REVIEW_RECORDED`, `STATUS_CHANGED`
 
 #### `AuditEventListener`
 
@@ -1745,6 +1771,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public void on(ProposalVersionCreatedEvent event)`
 - `public void on(ProposalDraftUpdatedEvent event)`
 - `public void on(ProjectStatusChangedEvent event)`
+- `public void on(ReviewerReassignedEvent event)`: REVIEWER_REASSIGNED with previousReviewerId and reviewerId in details
 - `public void on(ReviewRecordedEvent event)`
 
 #### `AuditLog`
@@ -1924,17 +1951,19 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 *class* · @Component · `src/main/java/com/prastav/notification/NotificationListener.java`
 
-**Responsibility.** Observer pattern. Subscribes to workflow and review events and tells the people involved through NotificationDispatcher: the assigned faculty member hears about an assignment and a resubmission, the student owner hears about every review decision. Why: the workflow and review code only publish facts and do not know notifications exist, so a new notification is a new handler here rather than an edit to a service. Handlers run after the publisher's transaction commits and in a transaction of their own, so a notification is only sent for a change that really happened, and a delivery problem can never roll that change back.
+**Responsibility.** Observer pattern. Subscribes to workflow and review events and tells the people involved through NotificationDispatcher: the assigned faculty member hears about an assignment and a resubmission, the student owner hears about every review decision, and a reassignment reaches both the old and the new reviewer. Why: the workflow and review code only publish facts and do not know notifications exist, so a new notification is a new handler here rather than an edit to a service. Handlers run after the publisher's transaction commits and in a transaction of their own, so a notification is only sent for a change that really happened, and a delivery problem can never roll that change back.
 
 | Field | Type | Visibility |
 |---|---|---|
 | `projectStore` | `ProjectStore` | private |
+| `userService` | `UserService` | private |
 | `dispatcher` | `NotificationDispatcher` | private |
 
 **Methods:**
 
-- `public NotificationListener(ProjectStore projectStore, NotificationDispatcher dispatcher)`
+- `public NotificationListener(ProjectStore projectStore, UserService userService, NotificationDispatcher dispatcher)`
 - `public void on(ProjectStatusChangedEvent event)`: `@TransactionalEventListener`, `@Transactional(REQUIRES_NEW)`; ASSIGN_REVIEWER notifies the reviewer (REVIEWER_ASSIGNED); SUBMIT from REVISION_REQUESTED notifies the reviewer (RESUBMITTED); any other action is ignored
+- `public void on(ReviewerReassignedEvent event)`: `@TransactionalEventListener`, `@Transactional(REQUIRES_NEW)`; notifies the previous reviewer (REVIEWER_UNASSIGNED), then the new reviewer (REVIEWER_ASSIGNED)
 - `public void on(ReviewRecordedEvent event)`: `@TransactionalEventListener`, `@Transactional(REQUIRES_NEW)`; notifies the project owner (REVIEW_DECISION)
 - `private void notify(User recipient, Project project, NotificationType type, String message)`: dispatches a new `Notification`
 
@@ -2006,7 +2035,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 **Responsibility.** What a notification is about. Stored as a string in notifications.type.
 
-**Constants:** `REVIEWER_ASSIGNED`, `REVIEW_DECISION`, `RESUBMITTED`
+**Constants:** `REVIEWER_ASSIGNED`, `REVIEWER_UNASSIGNED`, `REVIEW_DECISION`, `RESUBMITTED`
 
 ### 8.14 Package `com.prastav.notification.web`
 
@@ -2073,7 +2102,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 ## 9. Database schema
 
-Owned by Flyway (`V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`); Hibernate runs with `ddl-auto: none`. All ids are application-generated UUIDs; all timestamps are `TIMESTAMPTZ` stored in UTC.
+Owned by Flyway (`V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`, `V5__notification_reviewer_unassigned.sql`); Hibernate runs with `ddl-auto: none`. All ids are application-generated UUIDs; all timestamps are `TIMESTAMPTZ` stored in UTC.
 
 ![ER diagram](uml/png/10_er.png)
 
@@ -2151,14 +2180,14 @@ Trigger `trg_audit_logs_append_only` rejects UPDATE and DELETE.
 
 ### 9.6 `notifications`
 
-Created by `V4__notifications.sql`.
+Created by `V4__notifications.sql`; `V5__notification_reviewer_unassigned.sql` replaces `notifications_type_check` to allow REVIEWER_UNASSIGNED.
 
 | Column | Type | Constraints |
 |---|---|---|
 | id | UUID | PK |
 | recipient_id | UUID | NOT NULL, FK users |
 | project_id | UUID | FK projects, nullable |
-| type | VARCHAR(30) | NOT NULL, CHECK in (REVIEWER_ASSIGNED, REVIEW_DECISION, RESUBMITTED) |
+| type | VARCHAR(30) | NOT NULL, CHECK `notifications_type_check` in (REVIEWER_ASSIGNED, REVIEWER_UNASSIGNED, REVIEW_DECISION, RESUBMITTED) |
 | message | VARCHAR(500) | NOT NULL |
 | is_read | BOOLEAN | NOT NULL, DEFAULT false |
 | created_at | TIMESTAMPTZ | NOT NULL |
@@ -2204,7 +2233,8 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 | GET | /projects/{id}/proposals | participant | All versions | 200 `ProposalVersionResponse[]` |
 | GET | /projects/{id}/proposals/compare?from=&to= | participant | Field-by-field comparison of two versions (section 10.3) | 200 `ProposalDiff` |
 | POST | /projects/{id}/submit | STUDENT owner | Submit or resubmit | 200 `ProjectDetailResponse` |
-| POST | /projects/{id}/assign | COORDINATOR | Assign reviewer | 200 `ProjectDetailResponse` |
+| POST | /projects/{id}/assign | COORDINATOR | Assign reviewer (SUBMITTED) | 200 `ProjectDetailResponse` |
+| PUT | /projects/{id}/assign | COORDINATOR | Reassign reviewer (UNDER_REVIEW only, section 10.4) | 200 `ProjectDetailResponse` |
 | POST | /projects/{id}/reviews | FACULTY assigned | Record decision | 201 `ReviewResponse` |
 | GET | /projects/{id}/reviews | participant | Review history | 200 `ReviewResponse[]` |
 | GET | /projects/{id}/history | participant | Merged timeline | 200 `TimelineEntry[]` |
@@ -2349,6 +2379,33 @@ Rules: `role` is optional and only STUDENT is accepted; the email must be on `pr
 ```
 
 returns `ProjectDetailResponse` with `"status": "UNDER_REVIEW"` and `"reviewer": { "id": "a1b2c3d4-...", "name": "Dr. Anita Rao" }`. A non-faculty `facultyId` returns 400 "Reviewer must have the FACULTY role".
+
+`PUT /api/projects/{id}/assign` (COORDINATOR) reassigns the reviewer of a project that is UNDER_REVIEW. The body is the same `AssignReviewerRequest`:
+
+```json
+{ "facultyId": "e5f6a7b8-2222-4c3d-9e4f-5a6b7c8d9e0f" }
+```
+
+It returns `ProjectDetailResponse` with the status unchanged and the new reviewer:
+
+```json
+{ "id": "0b8f6c1e-...", "title": "AI Based Crop Monitoring", "status": "UNDER_REVIEW",
+  "owner": { "id": "7f1c...", "name": "Aarav Mehta" },
+  "reviewer": { "id": "e5f6a7b8-...", "name": "Dr. Vikram Shah" },
+  "allowedActions": ["REASSIGN_REVIEWER"], "...": "other ProjectDetailResponse fields" }
+```
+
+The audit log gets `REVIEWER_REASSIGNED` with `{"previousReviewerId":"a1b2c3d4-...","reviewerId":"e5f6a7b8-..."}`. The previous reviewer receives `REVIEWER_UNASSIGNED` and the new one `REVIEWER_ASSIGNED` (section 6.1). Errors:
+
+| Case | Response |
+|---|---|
+| Student or faculty caller | 403 `FORBIDDEN` "Your role is not allowed to perform this action" |
+| Missing `facultyId` | 400 `VALIDATION_FAILED` with `fieldErrors: [{ "field": "facultyId", ... }]` |
+| Unknown project or user | 404 `NOT_FOUND` |
+| New reviewer is not FACULTY | 400 `VALIDATION_FAILED` "Reviewer must have the FACULTY role" |
+| New reviewer is the current reviewer | 400 `VALIDATION_FAILED` "Dr. Anita Rao is already the assigned reviewer" |
+| Project not UNDER_REVIEW | 409 `ILLEGAL_TRANSITION` "Action REASSIGN_REVIEWER is not allowed while the project is SUBMITTED" |
+| Concurrent change to the project | 409 `CONCURRENT_UPDATE` |
 
 ### 10.5 Reviews
 
@@ -2498,7 +2555,7 @@ Without a token every notification endpoint returns 401 `UNAUTHENTICATED`.
 
 | Code | HTTP | Raised by | Example |
 |---|---|---|---|
-| VALIDATION_FAILED | 400 | `@Valid` failures (with `fieldErrors`), malformed JSON or UUID, `ValidationException` (incomplete proposal, missing review comments, non-faculty assignee, non-student registration, email outside the institutional domain or student pattern, duplicate email) | `fieldErrors: [{ "field": "title", "message": "must not be blank" }]` |
+| VALIDATION_FAILED | 400 | `@Valid` failures (with `fieldErrors`), malformed JSON or UUID, `ValidationException` (incomplete proposal, missing review comments, non-faculty assignee, reassignment to the current reviewer, non-student registration, email outside the institutional domain or student pattern, duplicate email) | `fieldErrors: [{ "field": "title", "message": "must not be blank" }]` |
 | UNAUTHENTICATED | 401 | `RestAuthErrorHandler.commence` (no/invalid/expired token), `UnauthenticatedException` (bad login) | "Authentication required: send a valid Bearer token" |
 | FORBIDDEN | 403 | `@PreAuthorize` denial, `ForbiddenException` from `ProjectAccessPolicy` or `Guards` | "Only the assigned reviewer can review this project" |
 | NOT_FOUND | 404 | `NotFoundException` | "Project 0b8f... not found" |
@@ -2515,7 +2572,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | Passwords | BCrypt (`BCryptPasswordEncoder`), never returned (`UserResponse` has no hash) |
 | Tokens | HS256 JWT, 60-minute expiry, claims `userId` and `role` (+ `sub`), secret from `JWT_SECRET` (startup fails if shorter than 32 bytes) |
 | Sessions | Stateless (`SessionCreationPolicy.STATELESS`), CSRF disabled because no cookies are used |
-| Authorization layer 1 | `@PreAuthorize("hasRole(...)")` on controller methods: STUDENT for create/edit/submit/revise, COORDINATOR for assign, user list and account creation, FACULTY for reviews |
+| Authorization layer 1 | `@PreAuthorize("hasRole(...)")` on controller methods: STUDENT for create/edit/submit/revise, COORDINATOR for assign, reassign, user list and account creation, FACULTY for reviews |
 | Authorization layer 2 | Ownership and assignment in the service/domain: `ProjectAccessPolicy` for reads and proposal edits, `Guards` inside state transitions. Needed because a role check cannot tell which student owns which project. |
 | Visibility | Business rule 1: `ProjectService.listProjects` scopes queries by role; `requireView` on every per-project read. Notifications: every query is scoped to the caller's id and `NotificationService.markRead` returns 403 for another user's notification |
 | Errors | 401/403 from the filter chain are written by `RestAuthErrorHandler` in `ApiError` format; no stack traces in responses |
@@ -2530,7 +2587,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | State | `ProjectState`, `DraftState`, `SubmittedState`, `UnderReviewState`, `RevisionRequestedState`, `ApprovedState`, `RejectedState` | Each status owns its legal actions; no status switch statements; illegal by default |
 | Factory | `ProjectStateFactory` (status to state), `ProposalVersionFactory` (v1 and vN+1 prefilled) | Creation and lookup rules live in one place |
 | Facade | `WorkflowService` | One simple API over states, persistence and events; every transition takes the same audited path |
-| Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener`; `ProjectStatusChangedEvent` and `ReviewRecordedEvent` also consumed by `NotificationListener` | Side effects (audit, notifications) decoupled from the workflow; a new side effect is a new listener |
+| Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewerReassignedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener`; `ProjectStatusChangedEvent`, `ReviewerReassignedEvent` and `ReviewRecordedEvent` also consumed by `NotificationListener` | Side effects (audit, notifications) decoupled from the workflow; a new side effect is a new listener |
 | Strategy | `ReviewDecisionHandler` + `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`; `EmailPolicy` + `PatternEmailPolicy` (institution email rules, swappable per institution); `NotificationChannel` + `InAppNotificationChannel`, `EmailNotificationChannel` chosen by `NotificationDispatcher` from configuration | Add a decision, an email rule or a delivery channel by adding a class |
 | Decorator | `RetryingNotificationChannel` wrapping every `NotificationChannel` enabled in `NotificationDispatcher` | Retry is added around any channel without changing the channel or the dispatcher, and every channel is retried the same way |
 | Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects` | One composable query for every list filter instead of a repository method per combination |
@@ -2583,12 +2640,12 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 |---|---|
 | `DraftStateTest` | owner submits complete draft (version frozen); non-owner 403; incomplete 400; no draft 409; assign/approve/revise/reject illegal |
 | `SubmittedStateTest` | coordinator assigns faculty; non-coordinator 403; non-faculty assignee 400; approving a SUBMITTED project is illegal |
-| `UnderReviewStateTest` | approve, request revision, reject; comments mandatory; unassigned faculty and student 403; submit/assign illegal |
+| `UnderReviewStateTest` | approve, request revision, reject; comments mandatory; unassigned faculty and student 403; submit/assign illegal; coordinator reassigns and the status stays; faculty or student reassigning 403; non-faculty new reviewer 400; same reviewer 400 |
 | `RevisionRequestedStateTest` | resubmit returns to UNDER_REVIEW with same reviewer; no new version 409; non-owner 403; review/assign illegal |
-| `TerminalStatesTest` | APPROVED and REJECTED refuse every action through the interface |
+| `TerminalStatesTest` | APPROVED and REJECTED refuse every action through the interface, including reassignment |
 | `ProjectStateFactoryTest` | every status resolves; missing or duplicate state fails fast |
-| `AllowedActionsResolverTest` | buttons per role and state, including CREATE_REVISION vs EDIT_DRAFT |
-| `WorkflowServiceTest` | transitions save and publish the event with from/to/details; illegal transition saves and publishes nothing; revision loop keeps the reviewer |
+| `AllowedActionsResolverTest` | buttons per role and state, including CREATE_REVISION vs EDIT_DRAFT and REASSIGN_REVIEWER for the coordinator only while UNDER_REVIEW |
+| `WorkflowServiceTest` | transitions save and publish the event with from/to/details; illegal transition saves and publishes nothing; revision loop keeps the reviewer; reassignment saves, keeps UNDER_REVIEW and publishes `ReviewerReassignedEvent` with both reviewers; reassignment from each of the five other statuses is ILLEGAL_TRANSITION with nothing saved or published; same reviewer, non-faculty reviewer and non-coordinator save and publish nothing |
 | `ReviewServiceTest` | strategy lookup per decision; review stored against latest submitted version; stale version 409 before any transition; failed transition stores nothing; non-participant 403 |
 | `ProposalServiceTest` | sequential numbering and prefill; v1 unchanged after v2 edits; one open draft; no revision while UNDER_REVIEW; no edit when SUBMITTED; owner-only edit |
 | `ProposalVersionTest` | immutability; missing-field detection; factory numbering |
@@ -2596,7 +2653,7 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `ProjectServiceTest` | create in DRAFT with v1 and event; faculty cannot create; list paging, sort and first-submission time; coordinator batch filter accepted, student or faculty passing admission year or branch 403; counts per role with zero-filled statuses and awaiting-assignment for the coordinator; stranger 403; latest submitted version in detail |
 | `ProjectListQueryTest` | defaults (page 0, size 10, LATEST), trimming, size bounds 1 and 50 accepted, negative page and size 0 or 51 rejected with `ValidationException`, branch trimmed and upper-cased, blank branch is no filter, LIKE wildcard escaping |
 | `ProjectSpecificationsTest` | role scope (student by owner, faculty by reviewer, coordinator everything), empty filters match everything, owner cohort by admission year and branch (a missing value leaves that column open), a student query combines owner scope, status and lower-case search over five columns |
-| `AuditEventListenerTest` | status change becomes an audit row with before/after and JSON details; action mapping |
+| `AuditEventListenerTest` | status change becomes an audit row with before/after and JSON details; reassignment becomes REVIEWER_REASSIGNED with both reviewer ids and no status; action mapping |
 | `PatternEmailPolicyTest` | valid student email parsed to year and branch; uppercase input normalized; wrong domain, missing or malformed year or branch rejected; faculty email institutional but not a student email |
 | `InstitutionConfigTest` | the shipped `application.yml` binds `InstitutionProperties` and parses a demo student email |
 | `AuthServiceTest` | student registration stores admission year and branch; omitted role means STUDENT; FACULTY and COORDINATOR, faculty-style email, other domain and duplicate email rejected |
@@ -2604,12 +2661,12 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `ProposalControllerWebTest` (MockMvc, `@WebMvcTest`) | compare body (`fromVersion`, `toVersion`, `fields[]`); 404, 400 and 403 error bodies; missing or non-numeric version 400 without calling the service; 401 without token |
 | `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400 |
 | `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; page and size passed to the repository, negative page and size 0 or 51 rejected; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project |
-| `NotificationListenerTest` | assignment notifies the assigned faculty (REVIEWER_ASSIGNED); resubmission from REVISION_REQUESTED notifies the faculty with the version (RESUBMITTED); a first submission and a decision's status change notify nobody; each of the three decisions notifies the student owner with its message (REVIEW_DECISION) |
+| `NotificationListenerTest` | assignment notifies the assigned faculty (REVIEWER_ASSIGNED); resubmission from REVISION_REQUESTED notifies the faculty with the version (RESUBMITTED); a first submission and a decision's status change notify nobody; each of the three decisions notifies the student owner with its message (REVIEW_DECISION); reassignment notifies the previous reviewer (REVIEWER_UNASSIGNED) and the new reviewer (REVIEWER_ASSIGNED) |
 | `NotificationDispatcherTest` | every enabled channel called in configured order; a throwing channel is retried up to max attempts and does not stop the others; every channel is wrapped in the retry decorator; a channel left out of the configuration is never called; unknown channel name rejected |
 | `NotificationChannelTest` | in-app channel stores through `NotificationService.create`; email channel only logs; the shipped `application.yml` enables `in-app` and `email` with 3 attempts and a 200ms delay |
 | `RetryingNotificationChannelTest` | no retry on success; succeeds on a later attempt; gives up after max attempts and rethrows the last failure; keeps the wrapped name; at least one attempt required |
 | `NotificationControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; each of the three roles lists its own inbox with default paging and the page envelope; `unread`, `page` and `size` bound; out-of-range size 400 from the service; malformed page or id 400 without calling the service; unread count; recipient marks one read; another user's notification 403; unknown id 404; read-all returns the changed count |
-| `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding (including `admissionYear` and `branch`) and the page envelope (`content`, `page`, `size`, `totalElements`, `totalPages`); defaults for a call without parameters; 400 `VALIDATION_FAILED` for an unknown status or sort, a malformed reviewer id, a negative or non-numeric page, a non-numeric admission year and size 0 or 51; 403 for a student batch filter; summary body |
+| `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding (including `admissionYear` and `branch`) and the page envelope (`content`, `page`, `size`, `totalElements`, `totalPages`); defaults for a call without parameters; 400 `VALIDATION_FAILED` for an unknown status or sort, a malformed reviewer id, a negative or non-numeric page, a non-numeric admission year and size 0 or 51; 403 for a student batch filter; summary body; `PUT /{id}/assign` calls `reassignReviewer` for the coordinator, 403 for student and faculty, 400 without `facultyId`, 409 ILLEGAL_TRANSITION body outside UNDER_REVIEW |
 
 All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed. `NotificationListenerTest` calls the listener methods directly, so it checks who is notified with what, not the after-commit timing, which comes from Spring.
 

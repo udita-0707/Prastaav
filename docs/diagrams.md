@@ -17,7 +17,7 @@ flowchart LR
   UC4["Submit / resubmit proposal"]
   UC5["View feedback and history"]
   UC6["Create revision vN+1"]
-  UC7["Assign faculty reviewer"]
+  UC7["Assign or reassign faculty reviewer"]
   UC8["Review latest submitted version"]
   UC9["View project timeline"]
   UC10["View all projects"]
@@ -184,6 +184,7 @@ classDiagram
     DRAFT_UPDATED
     PROPOSAL_SUBMITTED
     REVIEWER_ASSIGNED
+    REVIEWER_REASSIGNED
     REVIEW_RECORDED
     STATUS_CHANGED
   }
@@ -199,6 +200,7 @@ classDiagram
   class NotificationType {
     <<enumeration>>
     REVIEWER_ASSIGNED
+    REVIEWER_UNASSIGNED
     REVIEW_DECISION
     RESUBMITTED
   }
@@ -241,13 +243,14 @@ classDiagram
     +availableActions() Set~Action~
     +submit(Project project, Actor actor, ProposalVersion draft)
     +assignReviewer(Project project, User faculty, Actor actor)
+    +reassignReviewer(Project project, User faculty, Actor actor)
     +approve(Project project, Actor actor)
     +requestRevision(Project project, Actor actor, String comments)
     +reject(Project project, Actor actor, String comments)
   }
   class DraftState { +submit() }
   class SubmittedState { +assignReviewer() }
-  class UnderReviewState { +approve() +requestRevision() +reject() }
+  class UnderReviewState { +approve() +requestRevision() +reject() +reassignReviewer() }
   class RevisionRequestedState { +submit() }
   class ApprovedState
   class RejectedState
@@ -266,6 +269,7 @@ classDiagram
     <<Facade>>
     +submit(UUID projectId, Actor actor) Project
     +assignReviewer(UUID projectId, UUID facultyId, Actor actor) Project
+    +reassignReviewer(UUID projectId, UUID facultyId, Actor actor) Project
     +approve(UUID projectId, Actor actor) Project
     +requestRevision(UUID projectId, Actor actor, String comments) Project
     +reject(UUID projectId, Actor actor, String comments) Project
@@ -296,10 +300,18 @@ classDiagram
     toStatus
     details
   }
+  class ReviewerReassignedEvent {
+    <<record>>
+    projectId
+    actorId
+    previousReviewerId
+    newReviewerId
+  }
   ProjectStateFactory o--> ProjectState
   WorkflowService --> ProjectStateFactory
   WorkflowService --> ProjectStore
   WorkflowService ..> ProjectStatusChangedEvent : publishes
+  WorkflowService ..> ReviewerReassignedEvent : publishes
   AllowedActionsResolver --> ProjectStateFactory
   ProjectState ..> IllegalTransitionException : throws
   DraftState ..> Guards
@@ -316,6 +328,7 @@ stateDiagram-v2
   UNDER_REVIEW --> APPROVED : approve [assigned faculty]
   UNDER_REVIEW --> REVISION_REQUESTED : requestRevision [assigned faculty, comments]
   UNDER_REVIEW --> REJECTED : reject [assigned faculty, comments]
+  UNDER_REVIEW --> UNDER_REVIEW : reassignReviewer [COORDINATOR, new reviewer FACULTY and not the current one]
   REVISION_REQUESTED --> UNDER_REVIEW : submit (resubmit) [owner, vN+1 complete, reviewer set]
   APPROVED --> [*]
   REJECTED --> [*]
@@ -579,6 +592,7 @@ classDiagram
     +on(ProposalVersionCreatedEvent)
     +on(ProposalDraftUpdatedEvent)
     +on(ProjectStatusChangedEvent)
+    +on(ReviewerReassignedEvent)
     +on(ReviewRecordedEvent)
   }
   class AuditRecorder {
@@ -590,11 +604,13 @@ classDiagram
   AuditEventListener --> AuditRecorder
   class NotificationListener {
     -ProjectStore projectStore
+    -UserService userService
     -NotificationDispatcher dispatcher
     +on(ProjectStatusChangedEvent)
+    +on(ReviewerReassignedEvent)
     +on(ReviewRecordedEvent)
   }
-  note for NotificationListener "@TransactionalEventListener (after commit), REQUIRES_NEW.<br/>ASSIGN_REVIEWER and SUBMIT from REVISION_REQUESTED notify the reviewer;<br/>a review decision notifies the owner"
+  note for NotificationListener "@TransactionalEventListener (after commit), REQUIRES_NEW.<br/>ASSIGN_REVIEWER and SUBMIT from REVISION_REQUESTED notify the reviewer;<br/>a review decision notifies the owner;<br/>a reassignment notifies the previous and the new reviewer"
   NotificationListener --> NotificationDispatcher : dispatch()
   class ReviewDecisionHandler {
     <<interface>>
