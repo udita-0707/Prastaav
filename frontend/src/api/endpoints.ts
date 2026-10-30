@@ -8,6 +8,7 @@ import type {
   ProjectPage,
   ProjectPageResponse,
   ProposalContent,
+  ProposalDiff,
   ProposalVersionResponse,
   ReviewRequest,
   ReviewResponse,
@@ -45,6 +46,9 @@ export const createNextVersion = (projectId: string) =>
 
 export const listVersions = (projectId: string) =>
   api.get<ProposalVersionResponse[]>(`/projects/${projectId}/proposals`).then((r) => r.data);
+
+export const compareVersions = (projectId: string, from: number, to: number) =>
+  api.get<ProposalDiff>(`/projects/${projectId}/proposals/compare`, { params: { from, to } }).then((r) => r.data);
 
 export const submitProject = (projectId: string) =>
   api.post<ProjectDetailResponse>(`/projects/${projectId}/submit`).then((r) => r.data);
