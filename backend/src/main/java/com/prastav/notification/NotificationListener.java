@@ -1,12 +1,14 @@
 package com.prastav.notification;
 
 import com.prastav.auth.User;
+import com.prastav.auth.UserService;
 import com.prastav.project.Project;
 import com.prastav.project.ProjectStore;
 import com.prastav.review.ReviewRecordedEvent;
 import com.prastav.workflow.Action;
 import com.prastav.workflow.ProjectStatus;
 import com.prastav.workflow.ProjectStatusChangedEvent;
+import com.prastav.workflow.ReviewerReassignedEvent;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,7 +17,8 @@ import org.springframework.transaction.event.TransactionalEventListener;
 /**
  * <b>Observer pattern.</b> Subscribes to workflow and review events and tells the people involved through
  * {@link NotificationDispatcher}: the assigned faculty member hears about an assignment and a resubmission,
- * the student owner hears about every review decision.
+ * the student owner hears about every review decision, and a reassignment reaches both the old and the new
+ * reviewer.
  * <p>
  * Why: the workflow and review code only publish facts and do not know notifications exist, so a new
  * notification is a new handler here rather than an edit to a service. Handlers run after the publisher's
@@ -26,10 +29,13 @@ import org.springframework.transaction.event.TransactionalEventListener;
 public class NotificationListener {
 
     private final ProjectStore projectStore;
+    private final UserService userService;
     private final NotificationDispatcher dispatcher;
 
-    public NotificationListener(ProjectStore projectStore, NotificationDispatcher dispatcher) {
+    public NotificationListener(ProjectStore projectStore, UserService userService,
+                                NotificationDispatcher dispatcher) {
         this.projectStore = projectStore;
+        this.userService = userService;
         this.dispatcher = dispatcher;
     }
 
@@ -46,6 +52,16 @@ public class NotificationListener {
                     "\"" + project.getTitle() + "\" was resubmitted as version "
                             + event.details().get("versionNumber"));
         }
+    }
+
+    @TransactionalEventListener
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void on(ReviewerReassignedEvent event) {
+        Project project = projectStore.getById(event.projectId());
+        notify(userService.getById(event.previousReviewerId()), project, NotificationType.REVIEWER_UNASSIGNED,
+                "You are no longer the reviewer of \"" + project.getTitle() + "\"");
+        notify(project.getReviewer(), project, NotificationType.REVIEWER_ASSIGNED,
+                "You have been assigned to review \"" + project.getTitle() + "\"");
     }
 
     @TransactionalEventListener
