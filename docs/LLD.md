@@ -57,7 +57,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-13 | Notifications on reviewer assignment (to the faculty member), review decision (to the student owner) and resubmission (to the faculty member), stored per recipient with a read flag; paged inbox with unread filter, unread count, mark one or all read, each scoped to the caller; delivery through the configured channels (in-app, email log) | `NotificationListener`, `NotificationDispatcher`, `NotificationChannel`, `Notification`, `NotificationRepository`, `NotificationService`, `NotificationController`, `NotificationMapper`, `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/{id}/read`, `PATCH /api/notifications/read-all`, `V4__notifications.sql` |
 | FR-17 | Coordinator reassigns the reviewer of an UNDER_REVIEW project (status unchanged); the new reviewer must be FACULTY and differ from the current one; any other status is ILLEGAL_TRANSITION; audited and both reviewers notified | `PUT /api/projects/{id}/assign`, `WorkflowService.reassignReviewer`, `UnderReviewState.reassignReviewer`, `ReviewerReassignedEvent`, `AuditEventListener` (`REVIEWER_REASSIGNED`), `NotificationListener`, `V5__notification_reviewer_unassigned.sql` |
 | FR-14 | Compare two proposal versions field by field | `ProposalDiffService`, `ProposalDiff`, `FieldDiff`, `ProposalVersionRepository.findByProject_IdAndVersionNumber`, `GET /api/projects/{id}/proposals/compare?from=&to=` |
-| FR-15 | Role dashboards: counts per status and projects awaiting assignment | `ProjectService.countProjects`, `GET /api/projects/summary`, web app home pages |
+| FR-15 | Role dashboards: counts per status and projects awaiting assignment; coordinator dashboard with counts by status, the list of submitted projects without a reviewer and the open reviews of every faculty member, computed by grouped queries | `ProjectService.countProjects`, `GET /api/projects/summary`, `DashboardService`, `ProjectRepository.findAwaitingAssignment`, `ProjectRepository.reviewerWorkload`, `DashboardController`, `GET /api/dashboard/summary`, web app home pages |
 | FR-18 | Institution profile and email policy: institutional domain for every account; student-only registration with `<firstname>.<YY><branch>@domain`, storing admission year and branch; staff accounts created by the coordinator | `InstitutionProperties`, `EmailPolicy`, `PatternEmailPolicy`, `AuthService.register`, `UserService.createAccount`, `POST /api/users`, `V3__user_institution_profile.sql` |
 
 ### 2.2 Engineering items
@@ -69,8 +69,8 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment | 200 tests in `backend/src/test/java` (see section 16) |
-| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, account creation, notification inbox) | `ProjectControllerWebTest` (20 tests), `ProposalControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests), `NotificationControllerWebTest` (12 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment, coordinator dashboard | 207 tests in `backend/src/test/java` (see section 16) |
+| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, coordinator dashboard, account creation, notification inbox) | `ProjectControllerWebTest` (20 tests), `DashboardControllerWebTest` (4 tests), `ProposalControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests), `NotificationControllerWebTest` (12 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
 
@@ -134,9 +134,12 @@ com.prastav
 ├─ project     Project, ProjectRepository, ProjectStore, ProjectAccessPolicy, ProjectService,
 │              NewProject, ProjectView, ProjectCreatedEvent, ProjectHistoryService,
 │              TimelineEntry, TimelineEntryType, ProjectListQuery, ProjectListItem,
-│              ProjectSort, ProjectSpecifications, ProjectCounts, ProjectStatusCount
+│              ProjectSort, ProjectSpecifications, ProjectCounts, ProjectStatusCount,
+│              DashboardService, DashboardSummary, ProjectAwaitingAssignment, ReviewerWorkload
 │  └─ web      ProjectController, CreateProjectRequest, AssignReviewerRequest,
-│              ProjectSummaryResponse, ProjectDetailResponse, ProjectCountsResponse, ProjectMapper
+│              ProjectSummaryResponse, ProjectDetailResponse, ProjectCountsResponse, ProjectMapper,
+│              DashboardController, DashboardSummaryResponse, AwaitingAssignmentResponse,
+│              ReviewerWorkloadResponse, DashboardMapper
 ├─ proposal    ProposalVersion, ProposalVersionState, ProposalContent, ProposalVersionFactory,
 │              ProposalVersionRepository, ProposalService, ProposalVersionCreatedEvent,
 │              ProposalDraftUpdatedEvent, FirstSubmission, ProposalDiffService, ProposalDiff, FieldDiff
@@ -1022,6 +1025,31 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 ### 8.6 Package `com.prastav.project`
 
+#### `DashboardService`
+
+*class* · @Service · `src/main/java/com/prastav/project/DashboardService.java`
+
+**Responsibility.** Builds the coordinator dashboard from grouped database queries, so no project list is loaded to count it. An open review is a project UNDER_REVIEW: the reviewer still owes a decision.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `projectService` | `ProjectService` | private |
+| `projectRepository` | `ProjectRepository` | private |
+| `accessPolicy` | `ProjectAccessPolicy` | private |
+
+**Methods:**
+
+- `public DashboardService(ProjectService projectService, ProjectRepository projectRepository, ProjectAccessPolicy accessPolicy)`
+- `public DashboardSummary summary(Actor actor)`: COORDINATOR only (FORBIDDEN otherwise); counts from `ProjectService.countProjects`, then `findAwaitingAssignment(SUBMITTED)` and `reviewerWorkload(FACULTY, UNDER_REVIEW)`
+
+#### `DashboardSummary`
+
+*record* · `src/main/java/com/prastav/project/DashboardSummary.java`
+
+**Responsibility.** The coordinator dashboard: counts of all projects by status (every status present), the submitted projects that still need a reviewer (oldest first) and the open reviews of every faculty member.
+
+**Components:** `long total, Map<ProjectStatus, Long> byStatus, List<ProjectAwaitingAssignment> awaitingAssignment, List<ReviewerWorkload> reviewerWorkload`
+
 #### `NewProject`
 
 *record* · `src/main/java/com/prastav/project/NewProject.java`
@@ -1078,6 +1106,20 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public void requireView(Project project, Actor actor)`
 - `public void requireOwner(Project project, Actor actor)`
 - `public void requireRole(Actor actor, Role role)`
+
+#### `ProjectAwaitingAssignment`
+
+*interface* · `src/main/java/com/prastav/project/ProjectAwaitingAssignment.java`
+
+**Responsibility.** Projection for ProjectRepository.findAwaitingAssignment: a submitted project with no reviewer. waitingSince is the project's last update, which for a SUBMITTED project is the submission time.
+
+**Methods:**
+
+- `UUID getId()`
+- `String getTitle()`
+- `UUID getOwnerId()`
+- `String getOwnerName()`
+- `Instant getWaitingSince()`
 
 #### `ProjectCounts`
 
@@ -1149,6 +1191,8 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `List<ProjectStatusCount> countByStatusForOwner(UUID ownerId)`
 - `List<ProjectStatusCount> countByStatusForReviewer(UUID reviewerId)`
 - `List<ProjectStatusCount> countByStatus()`
+- `List<ProjectAwaitingAssignment> findAwaitingAssignment(ProjectStatus status)`: projects in `status` with no reviewer, oldest update first
+- `List<ReviewerWorkload> reviewerWorkload(Role role, ProjectStatus status)`: every user with `role` and the count of their projects in `status`, zero included (left join, `GROUP BY`), busiest first then by name
 - inherited `Page<Project> findAll(Specification<Project> spec, Pageable pageable)`
 
 #### `ProjectSort`
@@ -1237,6 +1281,18 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `Project project, ProposalVersion currentProposal, Integer latestSubmittedVersion, Set<Action> allowedActions`
 
+#### `ReviewerWorkload`
+
+*interface* · `src/main/java/com/prastav/project/ReviewerWorkload.java`
+
+**Responsibility.** Projection for ProjectRepository.reviewerWorkload: one faculty member and their open reviews.
+
+**Methods:**
+
+- `UUID getReviewerId()`
+- `String getReviewerName()`
+- `long getOpenReviews()`
+
 #### `TimelineEntry`
 
 *record* · `src/main/java/com/prastav/project/TimelineEntry.java`
@@ -1264,6 +1320,14 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID facultyId`
 
+#### `AwaitingAssignmentResponse`
+
+*record* · `src/main/java/com/prastav/project/web/AwaitingAssignmentResponse.java`
+
+**Responsibility.** A submitted project that has no reviewer yet.
+
+**Components:** `UUID id, String title, UserSummary owner, Instant waitingSince`
+
 #### `CreateProjectRequest`
 
 *record* · `src/main/java/com/prastav/project/web/CreateProjectRequest.java`
@@ -1276,6 +1340,39 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public NewProject toNewProject()`
 - `public ProposalContent proposalOrEmpty()`
+
+#### `DashboardController`
+
+*class* · @RestController · `src/main/java/com/prastav/project/web/DashboardController.java`
+
+**Responsibility.** Coordinator dashboard endpoint. HTTP only.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `dashboardService` | `DashboardService` | private |
+
+**Methods:**
+
+- `public DashboardController(DashboardService dashboardService)`
+- `public DashboardSummaryResponse summary(Actor actor)`: `GET /api/dashboard/summary`, COORDINATOR only
+
+#### `DashboardMapper`
+
+*final class* · `src/main/java/com/prastav/project/web/DashboardMapper.java`
+
+**Responsibility.** DTO mapper for the dashboard.
+
+**Methods:**
+
+- `public static DashboardSummaryResponse toResponse(DashboardSummary summary)`
+
+#### `DashboardSummaryResponse`
+
+*record* · `src/main/java/com/prastav/project/web/DashboardSummaryResponse.java`
+
+**Responsibility.** Body of GET /api/dashboard/summary.
+
+**Components:** `long total, Map<ProjectStatus, Long> byStatus, List<AwaitingAssignmentResponse> awaitingAssignment, List<ReviewerWorkloadResponse> reviewerWorkload`
 
 #### `ProjectController`
 
@@ -1345,6 +1442,14 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Responsibility.** One row of a project list. submittedAt is when the proposal was first submitted (null for a project that has never been submitted).
 
 **Components:** `UUID id, String title, String description, String teamMembers, ProjectStatus status, UserSummary owner, UserSummary reviewer, Instant submittedAt, Instant updatedAt`
+
+#### `ReviewerWorkloadResponse`
+
+*record* · `src/main/java/com/prastav/project/web/ReviewerWorkloadResponse.java`
+
+**Responsibility.** A faculty member and the number of projects under review assigned to them.
+
+**Components:** `UserSummary reviewer, long openReviews`
 
 
 ### 8.8 Package `com.prastav.proposal`
@@ -2203,8 +2308,8 @@ Every index in the schema besides the primary keys. Each one serves a column tha
 | users | `users_email_key` (from `UNIQUE`) | email | `V1__init.sql` | login and duplicate-email checks |
 | users | `idx_users_admission_year_branch` | (admission_year, branch) | `V3__user_institution_profile.sql` | cohort filters on students |
 | projects | `idx_projects_owner` | owner_id | `V1__init.sql` | student list scope, dashboard counts per owner, join to users |
-| projects | `idx_projects_reviewer` | reviewer_id | `V1__init.sql` | faculty list scope, `reviewerId` filter, counts per reviewer |
-| projects | `idx_projects_status` | status | `V1__init.sql` | `status` filter and counts by status |
+| projects | `idx_projects_reviewer` | reviewer_id | `V1__init.sql` | faculty list scope, `reviewerId` filter, counts per reviewer, join for the coordinator dashboard's reviewer workload |
+| projects | `idx_projects_status` | status | `V1__init.sql` | `status` filter, counts by status, the dashboard's awaiting-assignment list |
 | projects | `idx_projects_updated_at` | updated_at | `V2__project_list_indexes.sql` | default list order (LATEST, OLDEST) |
 | proposal_versions | `uq_proposal_project_version` (constraint) | (project_id, version_number) | `V1__init.sql` | sequential version numbers; versions of one project |
 | proposal_versions | `ux_proposal_one_open_draft` (partial, unique) | project_id WHERE state = 'DRAFT' | `V1__init.sql` | business rule 7: one open draft per project |
@@ -2227,6 +2332,7 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 | POST | /projects | STUDENT | Create project + draft v1 | 201 `ProjectDetailResponse` |
 | GET | /projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size= | any | Role-scoped, paged list with optional filters, search and sort (section 10.7) | 200 `ProjectPageResponse` |
 | GET | /projects/summary | any | Role-scoped counts by status for the dashboards | 200 `ProjectCountsResponse` |
+| GET | /dashboard/summary | COORDINATOR | Counts by status, projects awaiting assignment, reviewer workload (section 10.9) | 200 `DashboardSummaryResponse` |
 | GET | /projects/{id} | participant | Detail with `allowedActions` | 200 `ProjectDetailResponse` |
 | PUT | /projects/{id}/proposal | STUDENT owner | Edit open draft | 200 `ProposalVersionResponse` |
 | POST | /projects/{id}/proposals | STUDENT owner | Create next version (REVISION_REQUESTED only) | 201 `ProposalVersionResponse` |
@@ -2549,6 +2655,31 @@ A negative `page` or a `size` outside 1 to 50 returns 400 `VALIDATION_FAILED` ("
 
 Without a token every notification endpoint returns 401 `UNAUTHENTICATED`.
 
+### 10.9 Coordinator dashboard
+
+`GET /api/dashboard/summary` is for the coordinator only: a student or faculty member gets 403 `FORBIDDEN` and a call without a token 401 `UNAUTHENTICATED`. Everything is computed in the database with grouped queries; no project list is loaded to be counted.
+
+- `total` and `byStatus`: every project counted per status (`GROUP BY status`), every status present.
+- `awaitingAssignment`: SUBMITTED projects with no reviewer, oldest first. `waitingSince` is the time the project entered SUBMITTED.
+- `reviewerWorkload`: every FACULTY account with its number of open reviews, meaning projects UNDER_REVIEW assigned to it (`LEFT JOIN` plus `GROUP BY`, so a faculty member with no open review appears with 0). Busiest first, then by name.
+
+```json
+{
+  "total": 8,
+  "byStatus": { "DRAFT": 1, "SUBMITTED": 2, "UNDER_REVIEW": 3, "REVISION_REQUESTED": 1, "APPROVED": 1, "REJECTED": 0 },
+  "awaitingAssignment": [
+    { "id": "0b8f6c1e-...", "title": "AI Based Crop Monitoring",
+      "owner": { "id": "7f1c...", "name": "Aarav Mehta" }, "waitingSince": "2026-10-19T09:20:31.004Z" },
+    { "id": "5d2e9a40-...", "title": "Smart Attendance",
+      "owner": { "id": "c3d4...", "name": "Diya Kapoor" }, "waitingSince": "2026-10-21T11:02:47.318Z" }
+  ],
+  "reviewerWorkload": [
+    { "reviewer": { "id": "a1b2...", "name": "Dr. Anita Rao" }, "openReviews": 2 },
+    { "reviewer": { "id": "e5f6...", "name": "Dr. Vikram Shah" }, "openReviews": 1 }
+  ]
+}
+```
+
 ## 11. Validation and error codes
 
 `ApiError`: `{ timestamp, status, code, message, path, fieldErrors[] }` with `fieldErrors` items `{ field, message }`.
@@ -2593,7 +2724,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects` | One composable query for every list filter instead of a repository method per combination |
 | Repository | `UserRepository`, `ProjectRepository`, `ProposalVersionRepository`, `ReviewRepository`, `AuditLogRepository`, `NotificationRepository` | Persistence abstraction (Spring Data JPA) |
 | Builder | `AuditLog.builder()` / `AuditLog.Builder` | Readable construction with optional fields |
-| DTO + Mapper | `*Request`/`*Response` records, `UserMapper`, `ProjectMapper`, `ProposalMapper`, `ReviewMapper`, `NotificationMapper` | Entities never leave the service layer as JSON |
+| DTO + Mapper | `*Request`/`*Response` records, `UserMapper`, `ProjectMapper`, `DashboardMapper`, `ProposalMapper`, `ReviewMapper`, `NotificationMapper` | Entities never leave the service layer as JSON |
 | Value object | `ProposalContent`, `Actor`, `NewProject` | Immutable records passed between layers |
 
 ## 14. SOLID mapping
@@ -2651,6 +2782,7 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `ProposalVersionTest` | immutability; missing-field detection; factory numbering |
 | `ProposalDiffServiceTest` | every field in form order with fromValue, toValue and changed; identical versions have no changed field and reversed order is kept; version outside the project 404; same version 400 before any read; non-participant student and unassigned faculty 403 before any read; coordinator can compare |
 | `ProjectServiceTest` | create in DRAFT with v1 and event; faculty cannot create; list paging, sort and first-submission time; coordinator batch filter accepted, student or faculty passing admission year or branch 403; counts per role with zero-filled statuses and awaiting-assignment for the coordinator; stranger 403; latest submitted version in detail |
+| `DashboardServiceTest` | the coordinator's summary combines the status counts, the awaiting-assignment rows (SUBMITTED) and the reviewer workload (FACULTY, UNDER_REVIEW) from the repository queries; student and faculty 403 without touching any query |
 | `ProjectListQueryTest` | defaults (page 0, size 10, LATEST), trimming, size bounds 1 and 50 accepted, negative page and size 0 or 51 rejected with `ValidationException`, branch trimmed and upper-cased, blank branch is no filter, LIKE wildcard escaping |
 | `ProjectSpecificationsTest` | role scope (student by owner, faculty by reviewer, coordinator everything), empty filters match everything, owner cohort by admission year and branch (a missing value leaves that column open), a student query combines owner scope, status and lower-case search over five columns |
 | `AuditEventListenerTest` | status change becomes an audit row with before/after and JSON details; reassignment becomes REVIEWER_REASSIGNED with both reviewer ids and no status; action mapping |
@@ -2666,6 +2798,7 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `NotificationChannelTest` | in-app channel stores through `NotificationService.create`; email channel only logs; the shipped `application.yml` enables `in-app` and `email` with 3 attempts and a 200ms delay |
 | `RetryingNotificationChannelTest` | no retry on success; succeeds on a later attempt; gives up after max attempts and rethrows the last failure; keeps the wrapped name; at least one attempt required |
 | `NotificationControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; each of the three roles lists its own inbox with default paging and the page envelope; `unread`, `page` and `size` bound; out-of-range size 400 from the service; malformed page or id 400 without calling the service; unread count; recipient marks one read; another user's notification 403; unknown id 404; read-all returns the changed count |
+| `DashboardControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 200 with counts, awaiting-assignment rows (id, owner, waitingSince) and reviewer workload; student and faculty 403 `FORBIDDEN` without calling the service; 401 `UNAUTHENTICATED` without token |
 | `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding (including `admissionYear` and `branch`) and the page envelope (`content`, `page`, `size`, `totalElements`, `totalPages`); defaults for a call without parameters; 400 `VALIDATION_FAILED` for an unknown status or sort, a malformed reviewer id, a negative or non-numeric page, a non-numeric admission year and size 0 or 51; 403 for a student batch filter; summary body; `PUT /{id}/assign` calls `reassignReviewer` for the coordinator, 403 for student and faculty, 400 without `facultyId`, 409 ILLEGAL_TRANSITION body outside UNDER_REVIEW |
 
 All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed. `NotificationListenerTest` calls the listener methods directly, so it checks who is notified with what, not the after-commit timing, which comes from Spring.
