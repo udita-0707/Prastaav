@@ -10,7 +10,7 @@
 - Submit the proposal; the submitted version is frozen.
 - Follow the status on the home dashboard (totals, drafts, in review, approved) and get an alert when a reviewer requests changes.
 - Read the reviewer's feedback, start the next version (prefilled from the last one) and resubmit it to the same reviewer.
-- Browse earlier versions, reviews and the full timeline of a project, and compare any two versions field by field.
+- Browse earlier versions and reviews of a project, follow its Timeline tab (every version, review and status change in time order, with its type, who did it and when), and use the Compare tab to pick any two versions and see every field side by side, with changed fields highlighted.
 - Get a notification for every review decision on your project (approved, changes requested, rejected).
 
 **Faculty**
@@ -39,7 +39,7 @@
 | Home dashboard | `/app` | each role has its own |
 | Project list (My / Assigned / All Projects): title search, status filter, sort, pager with "Showing x–y of n"; the coordinator also filters by faculty, batch year and branch; loading, empty and error states | `/app/projects` | all roles, scoped by role |
 | Create project wizard | `/app/projects/new` | student |
-| Project page: overview, versions, reviews, timeline, next step | `/app/projects/:id` | participants |
+| Project page: overview, versions, compare (two versions side by side, changed fields highlighted), reviews, timeline (type, actor and time of each event), next step | `/app/projects/:id` | participants |
 | Edit draft or revision | `/app/projects/:id/edit` | student owner |
 | Reviews (Under Review projects) | `/app/reviews` | faculty, coordinator |
 | Assign faculty | `/app/assign` | coordinator |
