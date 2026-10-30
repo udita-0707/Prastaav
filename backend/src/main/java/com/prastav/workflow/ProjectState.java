@@ -31,6 +31,11 @@ public interface ProjectState {
         throw new IllegalTransitionException(status(), Action.ASSIGN_REVIEWER);
     }
 
+    /** Replaces the assigned reviewer without changing the status. */
+    default void reassignReviewer(Project project, User faculty, Actor actor) {
+        throw new IllegalTransitionException(status(), Action.REASSIGN_REVIEWER);
+    }
+
     default void approve(Project project, Actor actor) {
         throw new IllegalTransitionException(status(), Action.APPROVE);
     }

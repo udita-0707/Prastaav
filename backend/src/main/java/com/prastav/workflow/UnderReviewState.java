@@ -1,6 +1,9 @@
 package com.prastav.workflow;
 
 import com.prastav.auth.Actor;
+import com.prastav.auth.Role;
+import com.prastav.auth.User;
+import com.prastav.common.ValidationException;
 import com.prastav.project.Project;
 import org.springframework.stereotype.Component;
 
@@ -9,7 +12,8 @@ import java.util.Set;
 
 /**
  * State pattern: UNDER_REVIEW. Only the assigned faculty member may decide. Requesting a revision
- * or rejecting requires comments; approving does not.
+ * or rejecting requires comments; approving does not. The coordinator may hand the review to another
+ * faculty member, which keeps the status.
  */
 @Component
 public class UnderReviewState implements ProjectState {
@@ -21,7 +25,19 @@ public class UnderReviewState implements ProjectState {
 
     @Override
     public Set<Action> availableActions() {
-        return EnumSet.of(Action.APPROVE, Action.REQUEST_REVISION, Action.REJECT);
+        return EnumSet.of(Action.APPROVE, Action.REQUEST_REVISION, Action.REJECT, Action.REASSIGN_REVIEWER);
+    }
+
+    @Override
+    public void reassignReviewer(Project project, User faculty, Actor actor) {
+        Guards.requireRole(actor, Role.COORDINATOR);
+        if (faculty.getRole() != Role.FACULTY) {
+            throw new ValidationException("Reviewer must have the FACULTY role");
+        }
+        if (project.isReviewedBy(faculty.getId())) {
+            throw new ValidationException(faculty.getName() + " is already the assigned reviewer");
+        }
+        project.assignReviewer(faculty);
     }
 
     @Override

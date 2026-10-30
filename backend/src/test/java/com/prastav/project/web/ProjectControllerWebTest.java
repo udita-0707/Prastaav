@@ -14,6 +14,7 @@ import com.prastav.project.ProjectListItem;
 import com.prastav.project.ProjectListQuery;
 import com.prastav.project.ProjectService;
 import com.prastav.project.ProjectSort;
+import com.prastav.project.ProjectView;
 import com.prastav.workflow.Action;
 import com.prastav.workflow.IllegalTransitionException;
 import com.prastav.workflow.ProjectStatus;
@@ -41,10 +42,12 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -88,6 +91,65 @@ class ProjectControllerWebTest {
                         .content("{\"facultyId\":\"" + UUID.randomUUID() + "\"}"))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
+
+    @Test
+    void coordinatorReassignsTheReviewer() throws Exception {
+        UUID projectId = UUID.randomUUID();
+        UUID facultyId = UUID.randomUUID();
+        User owner = new User("Aarav Mehta", "aarav.23csai@nst.rishihood.edu.in", "hash", Role.STUDENT);
+        Project project = new Project("Crop Monitoring", "Drone images", null, null, owner);
+        when(projectService.getProject(eq(projectId), any(Actor.class)))
+                .thenReturn(new ProjectView(project, null, null, Set.of()));
+
+        mockMvc.perform(put("/api/projects/{id}/assign", projectId)
+                        .header("Authorization", bearer(Role.COORDINATOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"facultyId\":\"" + facultyId + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.title").value("Crop Monitoring"));
+
+        verify(workflowService).reassignReviewer(eq(projectId), eq(facultyId), any(Actor.class));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"STUDENT", "FACULTY"})
+    void onlyTheCoordinatorCanReassign(Role role) throws Exception {
+        mockMvc.perform(put("/api/projects/{id}/assign", UUID.randomUUID())
+                        .header("Authorization", bearer(role))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"facultyId\":\"" + UUID.randomUUID() + "\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+        verifyNoInteractions(workflowService);
+    }
+
+    @Test
+    void reassignWithoutFacultyIdIsA400() throws Exception {
+        mockMvc.perform(put("/api/projects/{id}/assign", UUID.randomUUID())
+                        .header("Authorization", bearer(Role.COORDINATOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("facultyId"));
+        verifyNoInteractions(workflowService);
+    }
+
+    @Test
+    void reassignOutsideUnderReviewIsA409() throws Exception {
+        UUID projectId = UUID.randomUUID();
+        when(workflowService.reassignReviewer(eq(projectId), any(UUID.class), any(Actor.class)))
+                .thenThrow(new IllegalTransitionException(ProjectStatus.SUBMITTED, Action.REASSIGN_REVIEWER));
+
+        mockMvc.perform(put("/api/projects/{id}/assign", projectId)
+                        .header("Authorization", bearer(Role.COORDINATOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"facultyId\":\"" + UUID.randomUUID() + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("ILLEGAL_TRANSITION"))
+                .andExpect(jsonPath("$.message")
+                        .value("Action REASSIGN_REVIEWER is not allowed while the project is SUBMITTED"));
     }
 
     @Test

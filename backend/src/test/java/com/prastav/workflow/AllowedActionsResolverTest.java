@@ -39,6 +39,14 @@ class AllowedActionsResolverTest {
     }
 
     @Test
+    void coordinatorCanReassignOnlyWhileUnderReview() {
+        Project project = TestData.projectIn(ProjectStatus.UNDER_REVIEW, owner, reviewer);
+        assertEquals(Set.of(Action.REASSIGN_REVIEWER),
+                resolver.resolve(project, TestData.actor(TestData.coordinator()), false));
+        assertTrue(resolver.resolve(project, TestData.actor(owner), false).isEmpty());
+    }
+
+    @Test
     void revisionRequestedOffersCreateRevisionUntilDraftExists() {
         Project project = TestData.projectIn(ProjectStatus.REVISION_REQUESTED, owner, reviewer);
         assertEquals(Set.of(Action.CREATE_REVISION), resolver.resolve(project, TestData.actor(owner), false));
