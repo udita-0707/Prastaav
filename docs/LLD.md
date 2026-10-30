@@ -2657,11 +2657,11 @@ Without a token every notification endpoint returns 401 `UNAUTHENTICATED`.
 
 ### 10.9 Coordinator dashboard
 
-`GET /api/dashboard/summary` is for the coordinator only: a student or faculty member gets 403 `FORBIDDEN` and a call without a token 401 `UNAUTHENTICATED`. Everything is computed in the database with grouped queries; no project list is loaded to be counted.
+`GET /api/dashboard/summary` is for the coordinator only: a student or faculty member gets 403 `FORBIDDEN` and a call without a token 401 `UNAUTHENTICATED`. Everything is computed in the database with grouped queries; no project list is loaded to be counted. The code lives in the `project` module (`DashboardService`, `project.web.DashboardController`) because it reads `ProjectRepository`, and a repository is used only inside its own module; the URL is still `/api/dashboard/summary`.
 
 - `total` and `byStatus`: every project counted per status (`GROUP BY status`), every status present.
 - `awaitingAssignment`: SUBMITTED projects with no reviewer, oldest first. `waitingSince` is the time the project entered SUBMITTED.
-- `reviewerWorkload`: every FACULTY account with its number of open reviews, meaning projects UNDER_REVIEW assigned to it (`LEFT JOIN` plus `GROUP BY`, so a faculty member with no open review appears with 0). Busiest first, then by name.
+- `reviewerWorkload`: every FACULTY account with its number of open reviews, meaning projects UNDER_REVIEW assigned to it (`LEFT JOIN` plus `GROUP BY`, so a faculty member with no open review appears with 0). Only UNDER_REVIEW counts as open: a REVISION_REQUESTED project is not counted, because the student owes the next step there, not the reviewer. Busiest first, then by name.
 
 ```json
 {
