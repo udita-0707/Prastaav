@@ -9,7 +9,7 @@ node "Browser" {
 node "prastav-backend (Spring Boot 3, Java 17)" {
   component "Security\n(JwtAuthenticationFilter,\nSecurityConfig, @PreAuthorize)" as SEC
   package "web layer" {
-    component "Controllers + DTO mappers\n(Auth, User, Project,\nProposal, Review)" as WEB
+    component "Controllers + DTO mappers\n(Auth, User, Project,\nProposal, Review, Notification)" as WEB
     component "GlobalExceptionHandler" as GEH
   }
   package "modules" {
@@ -19,7 +19,7 @@ node "prastav-backend (Spring Boot 3, Java 17)" {
     component "review\n(ReviewService,\nReviewDecisionHandler x3)" as REV
     component "workflow\n(WorkflowService, ProjectState x6,\nProjectStateFactory)" as WF
     component "audit\n(AuditEventListener,\nAuditRecorder, AuditQueryService)" as AUD
-    component "notification\n(NotificationService)" as NOTIF
+    component "notification\n(NotificationListener,\nNotificationDispatcher, NotificationService)" as NOTIF
   }
   component "Spring Data JPA repositories" as REPO
   component "Flyway migrations" as FLY
@@ -34,6 +34,7 @@ WEB --> PROJ
 WEB --> PROP
 WEB --> REV
 WEB --> WF
+WEB --> NOTIF
 REV --> WF : decision strategies
 PROJ --> PROP
 PROP --> WF : ProjectStateFactory\n(allowed actions)
@@ -42,6 +43,9 @@ WF ..> AUD : domain events (Observer)
 PROJ ..> AUD : events
 PROP ..> AUD : events
 REV ..> AUD : events
+WF ..> NOTIF : events (after commit)
+REV ..> NOTIF : events (after commit)
+NOTIF --> PROJ : ProjectStore
 NOTIF --> REPO
 AUTH --> REPO
 PROJ --> REPO

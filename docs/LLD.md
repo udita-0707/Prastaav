@@ -54,7 +54,7 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-10 | Audit log for every state change, assignment, submission, review | `AuditEventListener`, `AuditLog`, append-only trigger |
 | FR-11 | Project timeline | `ProjectHistoryService`, `GET /api/projects/{id}/history`, Timeline tab of the project page |
 | FR-12 | Role-scoped lists with status filter, search, coordinator batch filter, pagination | `ProjectService.listProjects`, `ProjectListQuery`, `ProjectSpecifications`, `GET /api/projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size=` |
-| FR-13 | In-app notifications stored per recipient with a read flag; inbox, unread count and mark-read scoped to the recipient; delivery through the configured channels (in-app, email log) | `Notification`, `NotificationRepository`, `NotificationService`, `NotificationMapper`, `NotificationDispatcher`, `NotificationChannel`, `V4__notifications.sql` |
+| FR-13 | Notifications on reviewer assignment (to the faculty member), review decision (to the student owner) and resubmission (to the faculty member), stored per recipient with a read flag; paged inbox with unread filter, unread count, mark one or all read, each scoped to the caller; delivery through the configured channels (in-app, email log) | `NotificationListener`, `NotificationDispatcher`, `NotificationChannel`, `Notification`, `NotificationRepository`, `NotificationService`, `NotificationController`, `NotificationMapper`, `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/{id}/read`, `PATCH /api/notifications/read-all`, `V4__notifications.sql` |
 | FR-14 | Compare two proposal versions field by field | `ProposalDiffService`, `ProposalDiff`, `FieldDiff`, `ProposalVersionRepository.findByProject_IdAndVersionNumber`, `GET /api/projects/{id}/proposals/compare?from=&to=` |
 | FR-15 | Role dashboards: counts per status and projects awaiting assignment | `ProjectService.countProjects`, `GET /api/projects/summary`, web app home pages |
 | FR-18 | Institution profile and email policy: institutional domain for every account; student-only registration with `<firstname>.<YY><branch>@domain`, storing admission year and branch; staff accounts created by the coordinator | `InstitutionProperties`, `EmailPolicy`, `PatternEmailPolicy`, `AuthService.register`, `UserService.createAccount`, `POST /api/users`, `V3__user_institution_profile.sql` |
@@ -68,8 +68,8 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, channels and retries | 160 tests in `backend/src/test/java` (see section 16) |
-| MockMvc tests (401 / 403 / 409 / 400 mapping, list and summary endpoints, account creation) | `ProjectControllerWebTest` (15 tests), `ProposalControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries | 181 tests in `backend/src/test/java` (see section 16) |
+| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, account creation, notification inbox) | `ProjectControllerWebTest` (15 tests), `ProposalControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests), `NotificationControllerWebTest` (12 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
 
@@ -97,6 +97,7 @@ proposal  -> project (ProjectStore, ProjectAccessPolicy), workflow (ProjectState
 review    -> workflow (WorkflowService via handlers), proposal, project, auth
 project   -> proposal (ProposalService), workflow (AllowedActionsResolver), auth, audit (history read)
 audit     -> listens to events from project, proposal, workflow, review
+notification -> project (ProjectStore), auth; listens to events from workflow, review
 ```
 
 `ProjectStore` exists so that `ProposalService` and `WorkflowService` can load and save projects without depending on `ProjectService`, which itself depends on `ProposalService`; this keeps constructor injection free of cycles.
@@ -107,7 +108,7 @@ audit     -> listens to events from project, proposal, workflow, review
 2. `@PreAuthorize` on the controller method checks the role (authorization layer 1).
 3. The controller calls a service with the `Actor` as an explicit parameter.
 4. The service loads data, checks ownership/assignment via `ProjectAccessPolicy` or the state guards (layer 2), changes state, saves, publishes events.
-5. Event listeners run synchronously in the same transaction (audit rows commit or roll back with the change).
+5. `AuditEventListener` runs synchronously in the same transaction (audit rows commit or roll back with the change). `NotificationListener` runs after that transaction commits, in a new transaction of its own (section 6.1).
 6. The controller maps the result to a response record. Any exception becomes an `ApiError` in `GlobalExceptionHandler` or `RestAuthErrorHandler`.
 
 ## 4. Package structure
@@ -147,8 +148,10 @@ com.prastav
 │              AuditEventListener, AuditQueryService
 └─ notification Notification, NotificationType, NotificationRepository, NotificationService,
                NotificationChannel, InAppNotificationChannel, EmailNotificationChannel,
-               NotificationDispatcher, NotificationProperties, RetryingNotificationChannel
-   └─ web      NotificationResponse, NotificationMapper
+               NotificationDispatcher, NotificationProperties, RetryingNotificationChannel,
+               NotificationListener
+   └─ web      NotificationController, NotificationResponse, NotificationPageResponse,
+               UnreadCountResponse, MarkAllReadResponse, NotificationMapper
 ```
 
 ## 5. Workflow engine
@@ -218,7 +221,7 @@ The UI renders buttons only from this list. The backend still re-checks every ac
 
 ## 6. Events and listeners (Observer)
 
-Publishers use Spring's `ApplicationEventPublisher`; listeners use `@EventListener`. Listeners run **synchronously in the publisher's transaction**: an audit row is committed if and only if the change it describes is committed.
+Publishers use Spring's `ApplicationEventPublisher`. `AuditEventListener` uses `@EventListener` and runs **synchronously in the publisher's transaction**: an audit row is committed if and only if the change it describes is committed. `NotificationListener` uses `@TransactionalEventListener` and runs after that transaction commits (section 6.1).
 
 | Event (record) | Published by | Payload | `AuditEventListener` writes |
 |---|---|---|---|
@@ -229,6 +232,28 @@ Publishers use Spring's `ApplicationEventPublisher`; listeners use `@EventListen
 | `ReviewRecordedEvent` | `ReviewService.recordReview` | projectId, reviewId, versionNumber, reviewerId, decision | `REVIEW_RECORDED` |
 
 `AuditEventListener` depends on the one-method `AuditRecorder` interface (implemented by `JpaAuditRecorder`), not on a repository. `details` is a small JSON object built with Jackson, e.g. `{"versionNumber":"2","action":"SUBMIT"}`.
+
+### 6.1 Notification dispatch
+
+`NotificationListener` turns three of these events into notifications. It never adds an event of its own: assignment and resubmission are already `ProjectStatusChangedEvent`s, and a decision is a `ReviewRecordedEvent`.
+
+| Event | Condition | Recipient | `NotificationType` | Message |
+|---|---|---|---|---|
+| `ProjectStatusChangedEvent` | `action == ASSIGN_REVIEWER` | the assigned reviewer (`Project.getReviewer()`) | `REVIEWER_ASSIGNED` | `You have been assigned to review "<title>"` |
+| `ProjectStatusChangedEvent` | `action == SUBMIT` and `fromStatus == REVISION_REQUESTED` | the assigned reviewer | `RESUBMITTED` | `"<title>" was resubmitted as version <details.versionNumber>` |
+| `ReviewRecordedEvent` | every decision | the student owner (`Project.getOwner()`) | `REVIEW_DECISION` | `Version <n> of "<title>" was approved` / `needs changes` / `was rejected` |
+
+Every other status change (first submission, and the APPROVE, REQUEST_REVISION and REJECT transitions, whose decision arrives as `ReviewRecordedEvent`) is ignored, so a decision produces exactly one notification.
+
+Sequence for one event, for example a reviewer requesting changes:
+
+1. `ReviewService.recordReview` runs the transition and saves the `Review` in its transaction, then publishes `ReviewRecordedEvent`. `AuditEventListener` writes `REVIEW_RECORDED` inside that transaction.
+2. Spring holds the event for `NotificationListener` (`@TransactionalEventListener`, phase AFTER_COMMIT) until the transaction commits. If it rolls back, the listener is never called and nobody is notified about a change that did not happen.
+3. After the commit the listener starts a new transaction (`@Transactional(propagation = REQUIRES_NEW)`), loads the project through `ProjectStore.getById` and picks the recipient: the owner for a decision, the reviewer for an assignment or resubmission.
+4. It builds a transient `Notification(recipient, project, type, message)` and calls `NotificationDispatcher.dispatch`.
+5. The dispatcher hands it to each enabled channel in configured order (`in-app`, then `email` by default), each wrapped in `RetryingNotificationChannel`. `InAppNotificationChannel` stores it through `NotificationService.create`; `EmailNotificationChannel` writes it to the log.
+6. A channel that still fails after its retries is logged at WARN and the next channel runs. Because the business transaction has already committed, a delivery failure can never undo the review, assignment or resubmission.
+7. The recipient reads it through `GET /api/notifications` (section 10.8).
 
 ![Observer and Strategy](uml/png/12_events_and_strategies.png)
 
@@ -893,7 +918,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 *record* · `src/main/java/com/prastav/workflow/ProjectStatusChangedEvent.java`
 
-**Responsibility.** Observer pattern event, published by WorkflowService after every successful transition. The workflow does not know who listens (today: the audit listener).
+**Responsibility.** Observer pattern event, published by WorkflowService after every successful transition. The workflow does not know who listens (AuditEventListener, NotificationListener).
 
 **Components:** `UUID projectId, UUID actorId, Action action, ProjectStatus fromStatus, ProjectStatus toStatus, Map<String, String> details`
 
@@ -1895,6 +1920,24 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public NotificationDispatcher(List<NotificationChannel> channels, NotificationProperties properties)`: resolves the configured names to channels and wraps each in a RetryingNotificationChannel; IllegalStateException for an unknown name
 - `public void dispatch(Notification notification)`: calls `deliver` on each enabled channel; a RuntimeException left after the retries is logged at WARN and the next channel runs
 
+#### `NotificationListener`
+
+*class* · @Component · `src/main/java/com/prastav/notification/NotificationListener.java`
+
+**Responsibility.** Observer pattern. Subscribes to workflow and review events and tells the people involved through NotificationDispatcher: the assigned faculty member hears about an assignment and a resubmission, the student owner hears about every review decision. Why: the workflow and review code only publish facts and do not know notifications exist, so a new notification is a new handler here rather than an edit to a service. Handlers run after the publisher's transaction commits and in a transaction of their own, so a notification is only sent for a change that really happened, and a delivery problem can never roll that change back.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `projectStore` | `ProjectStore` | private |
+| `dispatcher` | `NotificationDispatcher` | private |
+
+**Methods:**
+
+- `public NotificationListener(ProjectStore projectStore, NotificationDispatcher dispatcher)`
+- `public void on(ProjectStatusChangedEvent event)`: `@TransactionalEventListener`, `@Transactional(REQUIRES_NEW)`; ASSIGN_REVIEWER notifies the reviewer (REVIEWER_ASSIGNED); SUBMIT from REVISION_REQUESTED notifies the reviewer (RESUBMITTED); any other action is ignored
+- `public void on(ReviewRecordedEvent event)`: `@TransactionalEventListener`, `@Transactional(REQUIRES_NEW)`; notifies the project owner (REVIEW_DECISION)
+- `private void notify(User recipient, Project project, NotificationType type, String message)`: dispatches a new `Notification`
+
 #### `NotificationProperties`
 
 *record* · @ConfigurationProperties(prefix = "prastav.notification") · @Validated · `src/main/java/com/prastav/notification/NotificationProperties.java`
@@ -1926,6 +1969,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 | Field | Type | Visibility |
 |---|---|---|
+| `MAX_PAGE_SIZE` | `int` (50) | static final, package-private |
 | `notificationRepository` | `NotificationRepository` | private |
 
 **Methods:**
@@ -1933,6 +1977,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 - `public NotificationService(NotificationRepository notificationRepository)`
 - `public Notification create(User recipient, Project project, NotificationType type, String message)`: stores an unread notification; `project` may be null
 - `public Page<Notification> listFor(Actor actor, boolean unreadOnly, Pageable pageable)`: newest first
+- `public Page<Notification> listFor(Actor actor, boolean unreadOnly, int page, int size)`: 400 VALIDATION_FAILED for a negative page or a size outside 1 to 50, otherwise the page above with `PageRequest.of(page, size)`
 - `public long unreadCount(Actor actor)`
 - `public Notification markRead(UUID notificationId, Actor actor)`: 404 NOT_FOUND for an unknown id, 403 FORBIDDEN for another user's notification
 - `public int markAllRead(Actor actor)`: returns the number of notifications changed
@@ -1965,6 +2010,32 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 ### 8.14 Package `com.prastav.notification.web`
 
+#### `MarkAllReadResponse`
+
+*record* · `src/main/java/com/prastav/notification/web/MarkAllReadResponse.java`
+
+**Responsibility.** Body of PATCH /api/notifications/read-all: how many unread notifications were marked read.
+
+**Components:** `int updated`
+
+#### `NotificationController`
+
+*class* · @RestController · @PreAuthorize("hasAnyRole('STUDENT', 'FACULTY', 'COORDINATOR')") · `src/main/java/com/prastav/notification/web/NotificationController.java`
+
+**Responsibility.** The caller's own notification inbox. Every role has one; nobody can read or change another user's. HTTP only.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `notificationService` | `NotificationService` | private |
+
+**Methods:**
+
+- `public NotificationController(NotificationService notificationService)`
+- `public NotificationPageResponse list(boolean unread, int page, int size, Actor actor)`: defaults `unread=false`, `page=0`, `size=10`
+- `public UnreadCountResponse unreadCount(Actor actor)`
+- `public NotificationResponse markRead(UUID id, Actor actor)`
+- `public MarkAllReadResponse markAllRead(Actor actor)`
+
 #### `NotificationMapper`
 
 *final class* · `src/main/java/com/prastav/notification/web/NotificationMapper.java`
@@ -1974,6 +2045,15 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 **Methods:**
 
 - `public static NotificationResponse toResponse(Notification notification)`
+- `public static NotificationPageResponse toPage(Page<Notification> page)`
+
+#### `NotificationPageResponse`
+
+*record* · `src/main/java/com/prastav/notification/web/NotificationPageResponse.java`
+
+**Responsibility.** One page of the caller's inbox: the rows plus the paging numbers the UI needs to draw its pager.
+
+**Components:** `List<NotificationResponse> content, int page, int size, long totalElements, int totalPages`
 
 #### `NotificationResponse`
 
@@ -1982,6 +2062,14 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 **Responsibility.** One notification in the caller's inbox. projectId and projectTitle are null when it has no project.
 
 **Components:** `UUID id, NotificationType type, String message, UUID projectId, String projectTitle, boolean read, Instant createdAt`
+
+#### `UnreadCountResponse`
+
+*record* · `src/main/java/com/prastav/notification/web/UnreadCountResponse.java`
+
+**Responsibility.** Body of GET /api/notifications/unread-count.
+
+**Components:** `long count`
 
 ## 9. Database schema
 
@@ -2120,6 +2208,10 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 | POST | /projects/{id}/reviews | FACULTY assigned | Record decision | 201 `ReviewResponse` |
 | GET | /projects/{id}/reviews | participant | Review history | 200 `ReviewResponse[]` |
 | GET | /projects/{id}/history | participant | Merged timeline | 200 `TimelineEntry[]` |
+| GET | /notifications?unread=&page=&size= | any (own) | The caller's notifications, newest first, paged (section 10.8) | 200 `NotificationPageResponse` |
+| GET | /notifications/unread-count | any (own) | Number of unread notifications | 200 `UnreadCountResponse` |
+| PATCH | /notifications/{id}/read | recipient | Mark one notification read | 200 `NotificationResponse` |
+| PATCH | /notifications/read-all | any (own) | Mark every unread notification read | 200 `MarkAllReadResponse` |
 
 "Participant" means the owner, the assigned reviewer or any coordinator (`ProjectAccessPolicy.canView`).
 
@@ -2347,6 +2439,59 @@ An unknown `status` or `sort`, a malformed `reviewerId`, a non-numeric or negati
 { "total": 8, "byStatus": { "DRAFT": 1, "SUBMITTED": 2, "UNDER_REVIEW": 2, "REVISION_REQUESTED": 1, "APPROVED": 1, "REJECTED": 1 }, "awaitingAssignment": 2 }
 ```
 
+### 10.8 Notifications
+
+Every role has an inbox, and every endpoint works only on the caller's own notifications: the recipient is always the `Actor` from the token, never a parameter. Notifications are created by `NotificationListener` (section 6.1), not through the API.
+
+`GET /api/notifications?unread=true&page=0&size=10`
+
+| Parameter | Meaning |
+|---|---|
+| `unread` | `true` returns only unread notifications; default `false` (all) |
+| `page` | Zero-based page index, default 0 |
+| `size` | Rows per page, 1 to 50, default 10 |
+
+A negative `page` or a `size` outside 1 to 50 returns 400 `VALIDATION_FAILED` ("size must be between 1 and 50"); a non-numeric value also returns 400. Rows are newest first.
+
+```json
+{
+  "content": [
+    { "id": "3c9e7a10-...", "type": "REVIEW_DECISION", "message": "Version 1 of \"AI Based Crop Monitoring\" needs changes",
+      "projectId": "0b8f6c1e-...", "projectTitle": "AI Based Crop Monitoring", "read": false,
+      "createdAt": "2026-10-19T10:12:40.102Z" },
+    { "id": "8d21f4b5-...", "type": "REVIEW_DECISION", "message": "Version 1 of \"Library Seat Booking\" was approved",
+      "projectId": "4a77d0e2-...", "projectTitle": "Library Seat Booking", "read": false,
+      "createdAt": "2026-10-18T15:02:11.540Z" }
+  ],
+  "page": 0,
+  "size": 10,
+  "totalElements": 2,
+  "totalPages": 1
+}
+```
+
+`GET /api/notifications/unread-count`
+
+```json
+{ "count": 2 }
+```
+
+`PATCH /api/notifications/{id}/read` (no body) returns the updated `NotificationResponse`. Marking an already read notification again is allowed and changes nothing. An unknown id is 404 `NOT_FOUND`; another user's notification is 403 `FORBIDDEN` ("You can only change your own notifications"); a malformed id is 400.
+
+```json
+{ "id": "3c9e7a10-...", "type": "REVIEW_DECISION", "message": "Version 1 of \"AI Based Crop Monitoring\" needs changes",
+  "projectId": "0b8f6c1e-...", "projectTitle": "AI Based Crop Monitoring", "read": true,
+  "createdAt": "2026-10-19T10:12:40.102Z" }
+```
+
+`PATCH /api/notifications/read-all` (no body) marks every unread notification of the caller and returns how many changed:
+
+```json
+{ "updated": 2 }
+```
+
+Without a token every notification endpoint returns 401 `UNAUTHENTICATED`.
+
 ## 11. Validation and error codes
 
 `ApiError`: `{ timestamp, status, code, message, path, fieldErrors[] }` with `fieldErrors` items `{ field, message }`.
@@ -2372,7 +2517,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | Sessions | Stateless (`SessionCreationPolicy.STATELESS`), CSRF disabled because no cookies are used |
 | Authorization layer 1 | `@PreAuthorize("hasRole(...)")` on controller methods: STUDENT for create/edit/submit/revise, COORDINATOR for assign, user list and account creation, FACULTY for reviews |
 | Authorization layer 2 | Ownership and assignment in the service/domain: `ProjectAccessPolicy` for reads and proposal edits, `Guards` inside state transitions. Needed because a role check cannot tell which student owns which project. |
-| Visibility | Business rule 1: `ProjectService.listProjects` scopes queries by role; `requireView` on every per-project read |
+| Visibility | Business rule 1: `ProjectService.listProjects` scopes queries by role; `requireView` on every per-project read. Notifications: every query is scoped to the caller's id and `NotificationService.markRead` returns 403 for another user's notification |
 | Errors | 401/403 from the filter chain are written by `RestAuthErrorHandler` in `ApiError` format; no stack traces in responses |
 | CORS | Only `prastav.cors.allowed-origin` (default `http://localhost:5173`) for `/api/**`; in development Vite proxies `/api`, so the browser uses one origin |
 | Registration | Self-registration limited to STUDENT with an institutional student email (`PatternEmailPolicy`); FACULTY and COORDINATOR accounts come from `POST /api/users` (COORDINATOR only) or the seed |
@@ -2385,7 +2530,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | State | `ProjectState`, `DraftState`, `SubmittedState`, `UnderReviewState`, `RevisionRequestedState`, `ApprovedState`, `RejectedState` | Each status owns its legal actions; no status switch statements; illegal by default |
 | Factory | `ProjectStateFactory` (status to state), `ProposalVersionFactory` (v1 and vN+1 prefilled) | Creation and lookup rules live in one place |
 | Facade | `WorkflowService` | One simple API over states, persistence and events; every transition takes the same audited path |
-| Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener` | Side effects decoupled from the workflow |
+| Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener`; `ProjectStatusChangedEvent` and `ReviewRecordedEvent` also consumed by `NotificationListener` | Side effects (audit, notifications) decoupled from the workflow; a new side effect is a new listener |
 | Strategy | `ReviewDecisionHandler` + `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`; `EmailPolicy` + `PatternEmailPolicy` (institution email rules, swappable per institution); `NotificationChannel` + `InAppNotificationChannel`, `EmailNotificationChannel` chosen by `NotificationDispatcher` from configuration | Add a decision, an email rule or a delivery channel by adding a class |
 | Decorator | `RetryingNotificationChannel` wrapping every `NotificationChannel` enabled in `NotificationDispatcher` | Retry is added around any channel without changing the channel or the dispatcher, and every channel is retried the same way |
 | Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects` | One composable query for every list filter instead of a repository method per combination |
@@ -2413,6 +2558,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | Modular monolith | Microservices | One team, one database, simple transactions; modules can be split later along the same boundaries | Discipline needed to respect module boundaries |
 | State pattern | Enum + switch | Open/closed, one class per status, isolated tests | More classes; reading the flow means opening several files (mitigated by the diagrams) |
 | Synchronous `@EventListener` for audit | `@TransactionalEventListener(AFTER_COMMIT)`, outbox | Audit must be exactly as durable as the change: same transaction | A failing audit insert rolls back the business change (acceptable: audit is mandatory) |
+| `@TransactionalEventListener` (after commit, `REQUIRES_NEW`) for notifications | Synchronous `@EventListener`, outbox | Nobody is notified about a change that rolled back, and a delivery failure or retry pause never rolls back or holds the business transaction | A crash between the commit and the dispatch loses that notification (no outbox) |
 | Immutable versions + DB trigger | Edit in place with history table | Reviews must judge exactly the submitted text; defence in depth | Each revision duplicates text (tiny) |
 | Single reviewer per project | Reviewer panel | One accountable reviewer keeps the workflow simple | Two-reviewer rule needs a policy change (see INTERVIEW_PREP) |
 | Proposal as text fields + link | File upload | No file storage; fields can be validated and compared one by one | Formatting is plain text |
@@ -2457,13 +2603,15 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `UserServiceTest` | coordinator creates FACULTY and COORDINATOR without the student pattern; other callers 403; STUDENT, other domain and duplicate email rejected |
 | `ProposalControllerWebTest` (MockMvc, `@WebMvcTest`) | compare body (`fromVersion`, `toVersion`, `fields[]`); 404, 400 and 403 error bodies; missing or non-numeric version 400 without calling the service; 401 without token |
 | `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400 |
-| `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project |
+| `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; page and size passed to the repository, negative page and size 0 or 51 rejected; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project |
+| `NotificationListenerTest` | assignment notifies the assigned faculty (REVIEWER_ASSIGNED); resubmission from REVISION_REQUESTED notifies the faculty with the version (RESUBMITTED); a first submission and a decision's status change notify nobody; each of the three decisions notifies the student owner with its message (REVIEW_DECISION) |
 | `NotificationDispatcherTest` | every enabled channel called in configured order; a throwing channel is retried up to max attempts and does not stop the others; every channel is wrapped in the retry decorator; a channel left out of the configuration is never called; unknown channel name rejected |
 | `NotificationChannelTest` | in-app channel stores through `NotificationService.create`; email channel only logs; the shipped `application.yml` enables `in-app` and `email` with 3 attempts and a 200ms delay |
 | `RetryingNotificationChannelTest` | no retry on success; succeeds on a later attempt; gives up after max attempts and rethrows the last failure; keeps the wrapped name; at least one attempt required |
+| `NotificationControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; each of the three roles lists its own inbox with default paging and the page envelope; `unread`, `page` and `size` bound; out-of-range size 400 from the service; malformed page or id 400 without calling the service; unread count; recipient marks one read; another user's notification 403; unknown id 404; read-all returns the changed count |
 | `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding (including `admissionYear` and `branch`) and the page envelope (`content`, `page`, `size`, `totalElements`, `totalPages`); defaults for a call without parameters; 400 `VALIDATION_FAILED` for an unknown status or sort, a malformed reviewer id, a negative or non-numeric page, a non-numeric admission year and size 0 or 51; 403 for a student batch filter; summary body |
 
-All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed.
+All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed. `NotificationListenerTest` calls the listener methods directly, so it checks who is notified with what, not the after-commit timing, which comes from Spring.
 
 ## 17. Diagram index
 

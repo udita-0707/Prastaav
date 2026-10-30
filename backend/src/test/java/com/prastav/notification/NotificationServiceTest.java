@@ -4,6 +4,7 @@ import com.prastav.auth.Actor;
 import com.prastav.auth.User;
 import com.prastav.common.ForbiddenException;
 import com.prastav.common.NotFoundException;
+import com.prastav.common.ValidationException;
 import com.prastav.notification.web.NotificationMapper;
 import com.prastav.notification.web.NotificationResponse;
 import com.prastav.project.Project;
@@ -92,6 +93,25 @@ class NotificationServiceTest {
                 .thenReturn(page);
 
         assertSame(page, notificationService.listFor(TestData.actor(student), true, firstPage));
+        verify(notificationRepository, never()).findByRecipientIdOrderByCreatedAtDesc(any(), any());
+    }
+
+    @Test
+    void pageAndSizeBecomeTheRepositoryPage() {
+        Page<Notification> page = new PageImpl<>(List.of(notificationFor(student)));
+        when(notificationRepository.findByRecipientIdAndReadFalseOrderByCreatedAtDesc(student.getId(),
+                PageRequest.of(2, 5))).thenReturn(page);
+
+        assertSame(page, notificationService.listFor(TestData.actor(student), true, 2, 5));
+    }
+
+    @Test
+    void invalidPageOrSizeIsRejected() {
+        Actor actor = TestData.actor(student);
+
+        assertThrows(ValidationException.class, () -> notificationService.listFor(actor, false, -1, 10));
+        assertThrows(ValidationException.class, () -> notificationService.listFor(actor, false, 0, 0));
+        assertThrows(ValidationException.class, () -> notificationService.listFor(actor, false, 0, 51));
         verify(notificationRepository, never()).findByRecipientIdOrderByCreatedAtDesc(any(), any());
     }
 

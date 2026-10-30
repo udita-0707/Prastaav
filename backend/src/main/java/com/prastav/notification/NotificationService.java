@@ -4,8 +4,10 @@ import com.prastav.auth.Actor;
 import com.prastav.auth.User;
 import com.prastav.common.ForbiddenException;
 import com.prastav.common.NotFoundException;
+import com.prastav.common.ValidationException;
 import com.prastav.project.Project;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +21,8 @@ import java.util.UUID;
 @Service
 @Transactional(readOnly = true)
 public class NotificationService {
+
+    static final int MAX_PAGE_SIZE = 50;
 
     private final NotificationRepository notificationRepository;
 
@@ -37,6 +41,20 @@ public class NotificationService {
         return unreadOnly
                 ? notificationRepository.findByRecipientIdAndReadFalseOrderByCreatedAtDesc(actor.userId(), pageable)
                 : notificationRepository.findByRecipientIdOrderByCreatedAtDesc(actor.userId(), pageable);
+    }
+
+    /**
+     * One page of the actor's notifications. A negative {@code page} or a {@code size} outside
+     * 1..{@value #MAX_PAGE_SIZE} is rejected with VALIDATION_FAILED instead of being silently corrected.
+     */
+    public Page<Notification> listFor(Actor actor, boolean unreadOnly, int page, int size) {
+        if (page < 0) {
+            throw new ValidationException("page must be 0 or greater");
+        }
+        if (size < 1 || size > MAX_PAGE_SIZE) {
+            throw new ValidationException("size must be between 1 and " + MAX_PAGE_SIZE);
+        }
+        return listFor(actor, unreadOnly, PageRequest.of(page, size));
     }
 
     public long unreadCount(Actor actor) {
