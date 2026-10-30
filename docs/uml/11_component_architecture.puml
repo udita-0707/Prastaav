@@ -9,12 +9,12 @@ node "Browser" {
 node "prastav-backend (Spring Boot 3, Java 17)" {
   component "Security\n(JwtAuthenticationFilter,\nSecurityConfig, @PreAuthorize)" as SEC
   package "web layer" {
-    component "Controllers + DTO mappers\n(Auth, User, Project,\nProposal, Review, Notification)" as WEB
+    component "Controllers + DTO mappers\n(Auth, User, Project, Dashboard,\nProposal, Review, Notification)" as WEB
     component "GlobalExceptionHandler" as GEH
   }
   package "modules" {
     component "auth\n(UserService, AuthService, JwtService)" as AUTH
-    component "project\n(ProjectService, ProjectStore,\nProjectAccessPolicy, ProjectHistoryService)" as PROJ
+    component "project\n(ProjectService, ProjectStore,\nProjectAccessPolicy, ProjectHistoryService,\nDashboardService)" as PROJ
     component "proposal\n(ProposalService,\nProposalVersionFactory)" as PROP
     component "review\n(ReviewService,\nReviewDecisionHandler x3)" as REV
     component "workflow\n(WorkflowService, ProjectState x6,\nProjectStateFactory)" as WF
