@@ -2,6 +2,7 @@ package com.prastav.notification.web;
 
 import com.prastav.notification.Notification;
 import com.prastav.project.Project;
+import org.springframework.data.domain.Page;
 
 /** DTO mapper for notifications. */
 public final class NotificationMapper {
@@ -19,5 +20,10 @@ public final class NotificationMapper {
                 project == null ? null : project.getTitle(),
                 notification.isRead(),
                 notification.getCreatedAt());
+    }
+
+    public static NotificationPageResponse toPage(Page<Notification> page) {
+        return new NotificationPageResponse(page.map(NotificationMapper::toResponse).getContent(), page.getNumber(),
+                page.getSize(), page.getTotalElements(), page.getTotalPages());
     }
 }
