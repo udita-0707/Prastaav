@@ -24,9 +24,10 @@ flowchart LR
   UC11["Filter, search and page project lists"]
   UC12["View dashboard counts by status"]
   UC13["Create faculty or coordinator account"]
-  Student --> UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC9 & UC11 & UC12
-  Faculty --> UC1 & UC8 & UC5 & UC11 & UC12
-  Coordinator --> UC1 & UC7 & UC10 & UC9 & UC11 & UC12 & UC13
+  UC14["Read and mark own notifications"]
+  Student --> UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC9 & UC11 & UC12 & UC14
+  Faculty --> UC1 & UC8 & UC5 & UC11 & UC12 & UC14
+  Coordinator --> UC1 & UC7 & UC10 & UC9 & UC11 & UC12 & UC13 & UC14
 ```
 
 ## 2. Domain class diagram

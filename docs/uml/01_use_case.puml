@@ -21,6 +21,7 @@ rectangle "Prastav" {
   usecase "Filter, search and page project lists" as UC11
   usecase "View dashboard counts by status" as UC12
   usecase "Create faculty or coordinator account" as UC13
+  usecase "Read and mark own notifications" as UC14
 }
 
 Student --> UC1
@@ -45,4 +46,7 @@ Student --> UC12
 Faculty --> UC12
 Coordinator --> UC12
 Coordinator --> UC13
+Student --> UC14
+Faculty --> UC14
+Coordinator --> UC14
 @enduml
