@@ -1,6 +1,8 @@
 # Backend
 backend/target/
 *.class
+# Python
+__pycache__/
 # Frontend
 frontend/node_modules/
 frontend/dist/
