@@ -4,6 +4,7 @@ import { CheckCircle2, CircleSlash, MessageSquareWarning, type LucideIcon } from
 import { useState } from 'react';
 import { errorMessage } from '../api/client';
 import { recordReview } from '../api/endpoints';
+import { isRefusedAction, useRefusedAction } from '../lib/useRefusedAction';
 import type { Action, ReviewDecision } from '../api/types';
 import { ErrorNote } from './ErrorNote';
 import { Button, Textarea, useToast } from './ui';
@@ -22,6 +23,7 @@ export function ReviewPanel({ projectId, allowed, versionNumber }: { projectId: 
   const [decision, setDecision] = useState<ReviewDecision>(options[0]?.decision ?? 'APPROVE');
   const [comments, setComments] = useState('');
   const needsComments = decision !== 'APPROVE';
+  const onRefused = useRefusedAction(projectId);
   const mutation = useMutation({
     mutationFn: () => recordReview(projectId, { decision, comments, versionNumber }),
     onSuccess: () => {
@@ -32,6 +34,7 @@ export function ReviewPanel({ projectId, allowed, versionNumber }: { projectId: 
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       toast.show({ tone: 'success', title: 'Decision recorded', description: `${OPTIONS.find((o) => o.decision === decision)?.label} on version ${versionNumber}.` });
     },
+    onError: onRefused,
   });
 
   return (
@@ -73,7 +76,7 @@ export function ReviewPanel({ projectId, allowed, versionNumber }: { projectId: 
         value={comments}
         onChange={(e) => setComments(e.target.value)}
       />
-      <ErrorNote message={mutation.error ? errorMessage(mutation.error) : null} />
+      <ErrorNote message={mutation.error && !isRefusedAction(mutation.error) ? errorMessage(mutation.error) : null} />
       <Button type="submit" className="w-full" loading={mutation.isPending} disabled={needsComments && !comments.trim()}>
         Record decision
       </Button>

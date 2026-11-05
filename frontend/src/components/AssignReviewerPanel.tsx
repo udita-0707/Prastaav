@@ -3,6 +3,7 @@ import { UserPlus, UserRoundCog } from 'lucide-react';
 import { useState } from 'react';
 import { errorMessage } from '../api/client';
 import { assignReviewer, listFaculty, reassignReviewer } from '../api/endpoints';
+import { isRefusedAction, useRefusedAction } from '../lib/useRefusedAction';
 import type { UserSummary } from '../api/types';
 import { ErrorNote } from './ErrorNote';
 import { Button, Select, useToast } from './ui';
@@ -19,6 +20,7 @@ interface AssignReviewerPanelProps {
 export function AssignReviewerPanel({ projectId, projectTitle, reassignFrom, onAssigned }: AssignReviewerPanelProps) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const onRefused = useRefusedAction(projectId);
   const faculty = useQuery({ queryKey: ['faculty'], queryFn: listFaculty });
   const [facultyId, setFacultyId] = useState('');
   const options = faculty.data?.filter((f) => f.id !== reassignFrom?.id);
@@ -34,6 +36,10 @@ export function AssignReviewerPanel({ projectId, projectTitle, reassignFrom, onA
       });
       setFacultyId('');
       onAssigned?.();
+    },
+    onError: (error) => {
+      onRefused(error);
+      if (isRefusedAction(error)) onAssigned?.();
     },
   });
   const placeholder = faculty.isLoading ? 'Loading faculty…' : options?.length === 0 ? 'No other faculty member' : 'Choose a faculty member';
@@ -55,7 +61,7 @@ export function AssignReviewerPanel({ projectId, projectTitle, reassignFrom, onA
           </option>
         ))}
       </Select>
-      <ErrorNote message={faculty.error ? errorMessage(faculty.error) : mutation.error ? errorMessage(mutation.error) : null} onRetry={faculty.error ? () => faculty.refetch() : undefined} />
+      <ErrorNote message={faculty.error ? errorMessage(faculty.error) : mutation.error && !isRefusedAction(mutation.error) ? errorMessage(mutation.error) : null} onRetry={faculty.error ? () => faculty.refetch() : undefined} />
       <Button
         type="submit"
         variant={reassignFrom ? 'outline' : 'primary'}

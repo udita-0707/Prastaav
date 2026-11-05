@@ -18,6 +18,7 @@ import { formatDateTime, formatDay } from '../lib/format';
 import { parseTeam } from '../lib/people';
 import { ProjectIcon } from '../lib/projectIcon';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
+import { isRefusedAction, useRefusedAction } from '../lib/useRefusedAction';
 
 type TabId = 'overview' | 'versions' | 'compare' | 'reviews' | 'timeline';
 
@@ -90,6 +91,7 @@ export function ProjectDetailPage() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const onRefused = useRefusedAction(id);
   const project = useQuery({ queryKey: ['project', id], queryFn: () => getProject(id) });
   const versions = useQuery({ queryKey: ['versions', id, project.data?.updatedAt], queryFn: () => listVersions(id), enabled: project.isSuccess });
   const reviews = useQuery({ queryKey: ['reviews', id], queryFn: () => listReviews(id), enabled: project.isSuccess });
@@ -115,7 +117,10 @@ export function ProjectDetailPage() {
       setConfirmSubmit(false);
       toast.show({ tone: 'success', title: p.status === 'UNDER_REVIEW' ? 'Revision resubmitted' : 'Proposal submitted' });
     },
-    onError: () => setConfirmSubmit(false),
+    onError: (error) => {
+      setConfirmSubmit(false);
+      onRefused(error);
+    },
   });
   const revise = useMutation({
     mutationFn: () => createNextVersion(id),
@@ -123,6 +128,7 @@ export function ProjectDetailPage() {
       refresh();
       navigate(`/app/projects/${id}/edit?step=2`);
     },
+    onError: onRefused,
   });
 
   if (project.isLoading) {
@@ -147,6 +153,7 @@ export function ProjectDetailPage() {
   const team = parseTeam(p.teamMembers);
   const canSubmit = allowed.includes('SUBMIT') && current?.state === 'DRAFT';
   const canEdit = allowed.includes('EDIT_DRAFT') && current?.state === 'DRAFT';
+  const incomplete = (current?.missingFields.length ?? 0) > 0;
 
   return (
     <div className="space-y-6">
@@ -348,7 +355,7 @@ export function ProjectDetailPage() {
               </div>
             )}
             {canSubmit && (
-              <Button variant="gradient" className="w-full" onClick={() => setConfirmSubmit(true)} icon={<Send className="h-4 w-4" aria-hidden />}>
+              <Button variant="gradient" className="w-full" disabled={incomplete} onClick={() => setConfirmSubmit(true)} icon={<Send className="h-4 w-4" aria-hidden />}>
                 {p.status === 'REVISION_REQUESTED' ? `Resubmit v${current.versionNumber}` : `Submit v${current.versionNumber} for review`}
               </Button>
             )}
@@ -363,7 +370,7 @@ export function ProjectDetailPage() {
             {allowed.includes('ASSIGN_REVIEWER') && <AssignReviewerPanel projectId={id} projectTitle={p.title} />}
             {allowed.includes('REASSIGN_REVIEWER') && p.reviewer && <AssignReviewerPanel projectId={id} projectTitle={p.title} reassignFrom={p.reviewer} />}
             {reviewActions.length > 0 && <ReviewPanel projectId={id} allowed={reviewActions} versionNumber={p.latestSubmittedVersion} />}
-            <ErrorNote message={actionError ? errorMessage(actionError) : null} />
+            <ErrorNote message={actionError && !isRefusedAction(actionError) ? errorMessage(actionError) : null} />
           </Card>
         </aside>
       </div>

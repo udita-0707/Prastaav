@@ -12,6 +12,7 @@ import { DECISION_LABEL, FIELD_LABEL } from '../components/labels';
 import { formatDateTime, formatTime } from '../lib/format';
 import { parseTeam } from '../lib/people';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
+import { isRefusedAction, useRefusedAction } from '../lib/useRefusedAction';
 
 const STEPS = ['Basic Info', 'Problem & Objectives', 'Methodology & Outcomes', 'Timeline & Review'];
 const STEP_FIELDS: (keyof ProposalContent)[][] = [[], ['problemStatement', 'objectives'], ['methodology', 'expectedOutcome'], ['timeline', 'referenceLink']];
@@ -90,6 +91,7 @@ export function ProjectWizardPage() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const onRefused = useRefusedAction(id);
   const [searchParams, setSearchParams] = useSearchParams();
   const step = Math.min(Math.max(Number(searchParams.get('step') ?? 1) || 1, 1), STEPS.length) - 1;
 
@@ -125,13 +127,15 @@ export function ProjectWizardPage() {
 
   const dirty = useMemo(() => JSON.stringify({ basics, proposal }) !== snapshot, [basics, proposal, snapshot]);
 
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && !leaving.current && currentLocation.pathname !== nextLocation.pathname);
+  // Once the draft is gone there is nothing to keep, so nothing should ask before leaving.
+  const noOpenDraft = isEdit && Boolean(project.data) && (!project.data?.allowedActions.includes('EDIT_DRAFT') || project.data?.currentProposal?.state !== 'DRAFT');
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && !noOpenDraft && !leaving.current && currentLocation.pathname !== nextLocation.pathname);
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty || noOpenDraft) return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [dirty]);
+  }, [dirty, noOpenDraft]);
 
   const goToStep = (index: number) => {
     setErrors({});
@@ -184,6 +188,7 @@ export function ProjectWizardPage() {
       setSavedAt(now);
       setSnapshot(JSON.stringify({ basics, proposal }));
     },
+    onError: onRefused,
   });
 
   const submit = useMutation({
@@ -201,6 +206,7 @@ export function ProjectWizardPage() {
     },
     onError: (error) => {
       setConfirmSubmit(false);
+      onRefused(error);
       // The project exists even though the submit failed: move to its edit page, so trying again cannot create a second one.
       if (!id && createdId.current) {
         afterSave(createdId.current);
@@ -243,7 +249,7 @@ export function ProjectWizardPage() {
   if (isEdit && project.error) return <ErrorNote message={errorMessage(project.error)} onRetry={() => project.refetch()} />;
 
   const draft = project.data?.currentProposal;
-  if (isEdit && (!project.data?.allowedActions.includes('EDIT_DRAFT') || draft?.state !== 'DRAFT')) {
+  if (noOpenDraft) {
     return (
       <Card>
         <EmptyState
@@ -411,7 +417,7 @@ export function ProjectWizardPage() {
           )}
 
           <div className="mt-6">
-            <ErrorNote message={mutationError ? (mutationError instanceof ClientValidationError ? mutationError.message : errorMessage(mutationError)) : null} />
+            <ErrorNote message={mutationError && !isRefusedAction(mutationError) ? (mutationError instanceof ClientValidationError ? mutationError.message : errorMessage(mutationError)) : null} />
           </div>
 
           <div className="mt-8 flex flex-col-reverse gap-4 border-t border-line pt-6 sm:flex-row sm:items-center sm:justify-between">
