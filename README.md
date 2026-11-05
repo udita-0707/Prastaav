@@ -218,7 +218,7 @@ frontend/
 | --- | --- |
 | [`docs/PRD.md`](docs/PRD.md) | Requirements and technical specification |
 | [`docs/LLD.md`](docs/LLD.md) | Low level design: architecture, class catalogue, schema, API contracts, frontend architecture, tests |
-| [`docs/diagrams.md`](docs/diagrams.md), [`docs/uml/`](docs/uml) | Mermaid and PlantUML diagrams |
+| [`docs/diagrams.md`](docs/diagrams.md), [`docs/uml/`](docs/uml) | Mermaid and PlantUML diagrams: use cases, domain, State pattern, status machine, five sequences, ER, architecture, events, notification channels, auth view and the workflow activity |
 | [`docs/design/README.md`](docs/design/README.md) | Mockups, design tokens and UI components |
 | [`docs/design/ASSETS.md`](docs/design/ASSETS.md) | Every image, its size and where it is used |
 | [`docs/INTERVIEW_PREP.md`](docs/INTERVIEW_PREP.md) | Design walkthrough and change guide |

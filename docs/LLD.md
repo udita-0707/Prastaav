@@ -2003,7 +2003,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Retries (Decorator).** The dispatcher wraps every enabled channel in a `RetryingNotificationChannel`. A failed delivery is tried again up to `prastav.notification.retry.max-attempts` times in total (`NOTIFICATION_RETRY_MAX_ATTEMPTS`, default 3), with `prastav.notification.retry.delay` between attempts (`NOTIFICATION_RETRY_DELAY`, default 200ms). When every attempt fails, the decorator rethrows the last exception; it does not log the final failure itself. The dispatcher catches that `RuntimeException`, logs it at WARN and moves on to the next channel, so a failing email route never loses the in-app notification. A name in the list with no matching channel bean stops the application at startup.
 
-![Notification channels](uml/png/12_events_and_strategies.png)
+![Notification channels](uml/png/13_notification_classes.png)
 
 #### `EmailNotificationChannel`
 
@@ -2938,7 +2938,7 @@ All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring co
 
 ## 17. Diagram index
 
-PlantUML sources are in `docs/uml/*.puml` (shared style `_style.iuml`), rendered PNGs in `docs/uml/png/`. Mermaid equivalents are in `docs/diagrams.md` with renders in `docs/uml/mermaid-png/`.
+PlantUML sources are in `docs/uml/*.puml` (shared style `_style.iuml`), rendered PNGs in `docs/uml/png/` (PlantUML's built-in Smetana layout, set in `_style.iuml`, so no Graphviz is needed). Mermaid equivalents are in `docs/diagrams.md` with renders in `docs/uml/mermaid-png/`.
 
 | Diagram | File |
 |---|---|
@@ -2952,7 +2952,11 @@ PlantUML sources are in `docs/uml/*.puml` (shared style `_style.iuml`), rendered
 | Sequence: illegal transition rejected | `08_seq_illegal_transition` |
 | ER diagram | `10_er` |
 | Component / architecture | `11_component_architecture` |
-| Observer, Strategy and Decorator (events, review decisions, email policy, notification channels and retries) | `12_events_and_strategies` |
+| Observer and Strategy (domain events, audit, review decisions) | `12_events_and_strategies` |
+| Sequence: notification dispatch | `09_seq_notification_dispatch` |
+| Notification channels (Strategy and Decorator) | `13_notification_classes` |
+| Auth view (EmailPolicy Strategy) | `14_auth_classes` |
+| Activity: submit, assign, review, revise or approve | `15_activity_workflow` |
 
 ### Use cases
 
@@ -2977,6 +2981,18 @@ PlantUML sources are in `docs/uml/*.puml` (shared style `_style.iuml`), rendered
 ### Sequence: illegal transition
 
 ![Illegal transition](uml/png/08_seq_illegal_transition.png)
+
+### Sequence: notification dispatch
+
+![Notification dispatch](uml/png/09_seq_notification_dispatch.png)
+
+### Auth view
+
+![Auth view](uml/png/14_auth_classes.png)
+
+### Activity: submit, assign, review, revise or approve
+
+![Activity](uml/png/15_activity_workflow.png)
 
 ## 18. Frontend architecture
 
