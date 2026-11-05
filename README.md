@@ -22,10 +22,10 @@
 **Coordinator**
 - See every project with counts by status, search, status and faculty filters, a batch filter (admission year and branch of the project owner), sorting and paging.
 - Assign a faculty reviewer to submitted projects from the "Assign Faculty" page, from any list row or from the project page.
-- Hand a project under review to another faculty member through `PUT /api/projects/{id}/assign`; the change is audited and both reviewers are notified.
+- Hand a project under review to another faculty member from the project page; the control lists the other faculty and only appears when `allowedActions` includes `REASSIGN_REVIEWER`. The change is audited and both reviewers are notified.
 - Follow every review in progress from the "Reviews" list.
 - Create faculty and coordinator accounts on the institutional domain through `POST /api/users`.
-- Read the coordinator dashboard summary through `GET /api/dashboard/summary`: counts by status, the submitted projects still waiting for a reviewer (oldest first) and the open reviews of every faculty member.
+- Open the **Dashboard** page: counts for every status, the submitted projects still waiting for a reviewer (oldest first) with a quick assign, and the open reviews of every faculty member. An open review is a project `UNDER_REVIEW`; the data comes from `GET /api/dashboard/summary`.
 - Query the audit log through `GET /api/audit`: newest first and paged, filtered by project, actor, action and date range.
 
 **Everyone**
@@ -44,6 +44,7 @@
 | Project page: overview, versions, compare (two versions side by side, changed fields highlighted), reviews, timeline (type, actor and time of each event), next step | `/app/projects/:id` | participants |
 | Edit draft or revision | `/app/projects/:id/edit` | student owner |
 | Reviews (Under Review projects) | `/app/reviews` | faculty, coordinator |
+| Dashboard: status counts, waiting-for-assignment list with quick assign, reviewer workload | `/app/dashboard` | coordinator |
 | Assign faculty | `/app/assign` | coordinator |
 
 The mockups the screens follow are in [`docs/design`](docs/design/README.md).
