@@ -3307,6 +3307,14 @@ The lock covers `Project` only. Operations that do not save a project rely on un
 
 All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed. `NotificationListenerTest` calls the listener methods directly, so it checks who is notified with what, not the after-commit timing, which comes from Spring.
 
+### 12.2 Smoke test
+
+`scripts/smoke.sh` (bash, curl and jq) walks the whole flow against a running backend with the demo accounts: registration rules, login, the draft, submit, assignment, the revision loop, version comparison, approval, notifications, reassignment, the audit log, the dashboard against the project list, access control, and two simultaneous submits. Each run creates its own uniquely named data and stops with exit code 1 at the first failure. `BASE_URL` overrides `http://localhost:8080`. It runs against a real database, so it exercises what the test suite above cannot: Flyway, JPQL and the real `@Version` column. It marks the notifications of the demo accounts as read, so use a development database.
+
+### 12.3 Documentation checks
+
+`scripts/docs/run_all.sh` checks that every class, method, endpoint, table, column, index, migration and path named in the docs exists in the code, that every diagram has the same content in PlantUML and Mermaid and matches the code and migrations, and that section references, links and the banned-words rule hold. `scripts/docs/selftest.sh` plants faults in a temporary copy and confirms each check reports them. See `scripts/docs/README.md`.
+
 ## 13. Security design
 
 | Concern | Design |
@@ -3362,3 +3370,7 @@ The audit log page's project filter lists the 50 most recently updated projects,
 | Two `POST /api/projects/{id}/proposals` | One 201; the other 409 `CONCURRENT_UPDATE` when both pass the open-draft check (`uq_proposal_project_version` rejects the second), otherwise 409 `ILLEGAL_TRANSITION` | One new version |
 | Two registrations with one email | One 201; the other 400 `VALIDATION_FAILED` "Email is already registered", the same answer as the check before the insert | One account |
 | Two `PUT /api/projects/{id}/proposal` | Both 200; the last write wins, which is acceptable because a draft has one author | One draft, holding the later content |
+| `POST /api/projects/{id}/submit` commits while a `PUT /api/projects/{id}/proposal` is between its read and its write | Submit 200; the edit gets 500 `INTERNAL_ERROR`, because `trg_proposal_versions_immutable` rejects its write | The submitted version is unchanged |
+| A `PUT /api/projects/{id}/proposal` commits while a `POST /api/projects/{id}/submit` is between its read and its write | Both 200, but the submit writes back the text it read, so the edit is lost | The submitted version holds the text from before the edit |
+
+The last two need the requests to overlap inside that short window. The web app saves the draft and then submits, one after the other, so it does not produce them by itself.

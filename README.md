@@ -198,6 +198,8 @@ backend/src/main/java/com/prastav/
   audit/      append-only audit log fed by domain events, filtered query for the coordinator (+ web/)
   notification/ notifications: event listener, dispatcher, delivery channels, retry decorator, per-user inbox and read flags (+ web/ inbox endpoints)
 backend/src/main/resources/db/migration/   Flyway migrations
+scripts/smoke.sh       end-to-end smoke test
+scripts/docs/          documentation consistency checks
 frontend/
   public/brand/          logo, logo mark, favicon
   src/api/               Axios client, endpoints, DTO types
@@ -223,6 +225,7 @@ frontend/
 | [`docs/design/README.md`](docs/design/README.md) | Mockups, design tokens and UI components |
 | [`docs/design/ASSETS.md`](docs/design/ASSETS.md) | Every image, its size and where it is used |
 | [`docs/INTERVIEW_PREP.md`](docs/INTERVIEW_PREP.md) | Design walkthrough and change guide |
+| [`scripts/docs/README.md`](scripts/docs/README.md) | How to run the documentation checks |
 
 ## Tests
 
@@ -230,6 +233,8 @@ frontend/
 cd backend && mvn -q test                  # JUnit 5 + Mockito unit tests and MockMvc slice tests; no database needed
 cd frontend && npm run typecheck           # TypeScript type check
 cd frontend && npm run build               # type check and production build
+scripts/smoke.sh                           # end-to-end flow against a running backend with the demo accounts; needs curl and jq
+scripts/docs/run_all.sh                    # docs against code and diagrams against each other; needs python3
 ```
 
 The backend has **321 tests** in 41 test classes. The frontend has no automated tests; `npm run build` type-checks it. Because the backend tests use no database, JPQL, Flyway migrations and the real `@Version` column run only in the application itself.

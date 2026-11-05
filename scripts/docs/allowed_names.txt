@@ -1,0 +1,24 @@
+# Names the docs may use that the code does not contain.
+# Products and tools
+TanStack
+TypeScript
+PlantUML
+OpenAPI
+OpenCV
+GitHub
+DevOps
+# Spring and Flyway names that appear only in the docs
+AFTER_COMMIT
+flyway_schema_history
+# Variables of scripts/smoke.sh
+BASE_URL
+# Named to say that no class declares it
+getInstance
+# Inherited from Spring Data
+ProjectRepository.findAll
+# Diagram ids for nested types, and the document itself
+AuditLogBuilder
+NotificationPropertiesRetry
+INTERVIEW_PREP
+# A file the reader creates from frontend/.env.example
+frontend/.env
