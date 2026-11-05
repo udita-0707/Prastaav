@@ -50,6 +50,9 @@ export function CoordinatorHome({ user }: { user: UserResponse }) {
               </Link>
             }
           />
+          <div className="mt-4 empty:hidden">
+            <ErrorNote message={awaiting.error ? errorMessage(awaiting.error) : null} onRetry={() => awaiting.refetch()} />
+          </div>
           <ul className="mt-4 space-y-3">
             {awaiting.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
             {awaiting.data?.items.map((p) => (
