@@ -54,4 +54,12 @@ class NotificationChannelTest {
                     assertEquals(new NotificationProperties.Retry(3, Duration.ofMillis(200)), properties.retry());
                 });
     }
+
+    @Test
+    void shippedConfigurationReturnsTheConnectionAtCommitSoDeliveryCannotStarveThePool() {
+        new ApplicationContextRunner()
+                .withInitializer(new ConfigDataApplicationContextInitializer())
+                .run(context -> assertEquals("DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION",
+                        context.getEnvironment().getProperty("spring.jpa.properties.hibernate.connection.handling_mode")));
+    }
 }

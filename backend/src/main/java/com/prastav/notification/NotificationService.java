@@ -10,6 +10,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.UUID;
@@ -30,10 +31,14 @@ public class NotificationService {
         this.notificationRepository = notificationRepository;
     }
 
-    /** Stores a new unread notification for {@code recipient}; {@code project} may be null. */
-    @Transactional
+    /**
+     * Stores a new unread notification for {@code recipient}; {@code project} may be null. Runs in its own
+     * transaction and flushes inside it, so a failing INSERT throws here, inside the caller's retry loop, and
+     * every attempt starts clean.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Notification create(User recipient, Project project, NotificationType type, String message) {
-        return notificationRepository.save(new Notification(recipient, project, type, message));
+        return notificationRepository.saveAndFlush(new Notification(recipient, project, type, message));
     }
 
     /** The actor's notifications, newest first; {@code unreadOnly} limits the page to unread ones. */

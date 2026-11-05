@@ -45,7 +45,7 @@ class NotificationServiceTest {
     @BeforeEach
     void setUp() {
         notificationRepository = mock(NotificationRepository.class);
-        when(notificationRepository.save(any(Notification.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(notificationRepository.saveAndFlush(any(Notification.class))).thenAnswer(invocation -> invocation.getArgument(0));
         notificationService = new NotificationService(notificationRepository);
     }
 
@@ -54,7 +54,7 @@ class NotificationServiceTest {
         Notification created = notificationService.create(student, project, NotificationType.REVIEW_DECISION,
                 "Dr. Anita Rao requested changes on Smart Attendance");
 
-        verify(notificationRepository).save(created);
+        verify(notificationRepository).saveAndFlush(created);
         assertSame(student, created.getRecipient());
         assertSame(project, created.getProject());
         assertEquals(NotificationType.REVIEW_DECISION, created.getType());

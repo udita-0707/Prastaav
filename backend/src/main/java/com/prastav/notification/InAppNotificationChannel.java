@@ -2,7 +2,10 @@ package com.prastav.notification;
 
 import org.springframework.stereotype.Component;
 
-/** Strategy pattern: the {@link NotificationChannel} that stores the notification in the recipient's inbox. */
+/**
+ * Strategy pattern: the {@link NotificationChannel} that stores the notification in the recipient's inbox.
+ * {@link NotificationService#create} commits its own transaction, so a returned call means the row is stored.
+ */
 @Component
 public class InAppNotificationChannel implements NotificationChannel {
 
