@@ -239,6 +239,8 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 
 `ProjectSortTest` covers every list order and its id tie-break. `ProjectSpecificationsTest`, `ProposalDiffServiceTest` and `DashboardServiceTest` also cover each list filter alone and combined, that a reviewer filter cannot widen a role's scope, literal wildcards in search, version comparison with empty fields and missing versions, and a dashboard with no projects. The tests run without a database, so the JPQL of the grouped dashboard queries runs only against PostgreSQL in the running application.
 
+`NotificationFlowTest` also covers delivery failures: a failed inbox insert is retried and stored, and when every attempt fails nothing is stored, the failure is logged, and the workflow change, its audit entry and other recipients are unaffected. `GlobalExceptionHandlerTest`, `ProposalControllerWebTest`, `UserControllerWebTest` and `AuthControllerWebTest` check that losing a race to a unique index gives a clean answer with no SQL or constraint name: 409 `CONCURRENT_UPDATE` for a proposal version, and the same 400 as the duplicate-email check for an email.
+
 ## Design patterns
 
 | Pattern | Where |

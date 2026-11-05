@@ -18,7 +18,7 @@ RS -> AEL : ReviewRecordedEvent, handled now in the same transaction
 AEL -> DB : insert audit REVIEW_RECORDED
 note over RS, NL : Spring holds the event for NotificationListener until the transaction ends
 alt the transaction commits
-RS -> NL : on(ReviewRecordedEvent) after commit, in a new REQUIRES_NEW transaction
+RS -> NL : on(ReviewRecordedEvent) after commit, the request's connection already returned
 NL -> ST : getById(projectId)
 ST --> NL : Project
 NL -> NL : new Notification(owner, project, REVIEW_DECISION, message)
@@ -29,7 +29,8 @@ alt channel in-app
 loop up to maxAttempts while delivery throws, pausing delay between attempts
 RNC -> IA : deliver(notification)
 IA -> NS : create(recipient, project, type, message)
-NS -> NS : notificationRepository.save, not flushed yet
+NS -> DB : new REQUIRES_NEW transaction: saveAndFlush runs the INSERT, then commit
+note over RNC, DB : A failing INSERT throws here, inside the retry loop, and rolls back only this attempt
 end
 else channel email
 loop up to maxAttempts while delivery throws, pausing delay between attempts
@@ -39,8 +40,7 @@ end
 end
 RNC --> ND : returns, or rethrows the last failure, which NotificationDispatcher logs at WARN before the next channel
 end
-NL -> DB : commit of the REQUIRES_NEW transaction: INSERT into notifications
-note over NL, DB : This INSERT runs after the retry decorator has returned, so a failed INSERT is not retried. Spring logs it and that inbox row is lost. The committed review is not affected.
+note over NL, DB : Each attempt and each notification has its own transaction, so a failure cannot reach the committed review, its audit entry or another notification.
 else the transaction rolls back
 note over RS, NL : NotificationListener is not called and nobody is notified
 end

@@ -99,7 +99,7 @@ NotificationRepository ..> Notification : stores
 Notification "*" --> "1" NotificationType : type
 
 note right of NotificationListener
-  After commit, REQUIRES_NEW.
+  After commit, no transaction of its own.
   ASSIGN_REVIEWER and SUBMIT from REVISION_REQUESTED: reviewer.
   Review decision: owner.
   Reassignment: previous and new reviewer.

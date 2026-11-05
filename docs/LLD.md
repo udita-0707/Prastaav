@@ -70,8 +70,8 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment, coordinator dashboard, audit query, notification flow, concurrent updates | 309 tests in `backend/src/test/java` (see section 16) |
-| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, coordinator dashboard, account creation, notification inbox, audit log) | `ProjectControllerWebTest` (23 tests), `DashboardControllerWebTest` (6 tests), `ProposalControllerWebTest` (7 tests), `UserControllerWebTest` (4 tests), `NotificationControllerWebTest` (12 tests), `AuditControllerWebTest` (20 tests), `ConcurrentSubmissionWebTest` (4 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment, coordinator dashboard, audit query, notification flow, concurrent updates | 321 tests in `backend/src/test/java` (see section 16) |
+| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, coordinator dashboard, account creation, notification inbox, audit log) | `ProjectControllerWebTest` (23 tests), `DashboardControllerWebTest` (6 tests), `ProposalControllerWebTest` (8 tests), `UserControllerWebTest` (5 tests), `AuthControllerWebTest` (2 tests), `NotificationControllerWebTest` (12 tests), `AuditControllerWebTest` (20 tests), `ConcurrentSubmissionWebTest` (4 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
 
@@ -268,10 +268,10 @@ Sequence for one event, for example a reviewer requesting changes:
 
 1. `ReviewService.recordReview` runs the transition and saves the `Review` in its transaction, then publishes `ReviewRecordedEvent`. `AuditEventListener` writes `REVIEW_RECORDED` inside that transaction.
 2. Spring holds the event for `NotificationListener` (`@TransactionalEventListener`, phase AFTER_COMMIT) until the transaction commits. If it rolls back, the listener is never called and nobody is notified about a change that did not happen.
-3. After the commit the listener starts a new transaction (`@Transactional(propagation = REQUIRES_NEW)`), loads the project through `ProjectStore.getById` and picks the recipient: the owner for a decision, the reviewer for an assignment or resubmission.
+3. After the commit the listener runs with no transaction of its own (`@Transactional(propagation = NOT_SUPPORTED)`), loads the project through `ProjectStore.getById` and picks the recipient: the owner for a decision, the reviewer for an assignment or resubmission.
 4. It builds a transient `Notification(recipient, project, type, message)` and calls `NotificationDispatcher.dispatch`.
-5. The dispatcher hands it to each enabled channel in configured order (`in-app`, then `email` by default), each wrapped in `RetryingNotificationChannel`. `InAppNotificationChannel` calls `NotificationService.create`, which joins the listener's transaction and does not flush; `EmailNotificationChannel` writes it to the log.
-6. A channel that still throws after its retries is logged at WARN and the next channel runs. The inbox row's INSERT runs when the listener's transaction commits, after the dispatcher has returned (see section 15.2). Because the business transaction has already committed, a delivery failure can never undo the review, assignment or resubmission.
+5. The dispatcher hands it to each enabled channel in configured order (`in-app`, then `email` by default), each wrapped in `RetryingNotificationChannel`. `InAppNotificationChannel` calls `NotificationService.create`, which runs in its own transaction (`REQUIRES_NEW`) and flushes inside it, so a failing INSERT throws inside the retry loop and every attempt starts clean; `EmailNotificationChannel` writes it to the log.
+6. A channel that still throws after its retries is logged at WARN and the next channel runs. No row is stored for that recipient, and the other notifications of the event still go out, because each has its own transaction. The business transaction has already committed, so a delivery failure can never undo the review, assignment or resubmission or its audit entry.
 7. The recipient reads it through `GET /api/notifications` (section 10.8).
 
 ![Observer and Strategy](uml/png/12_events_and_strategies.png)
@@ -402,6 +402,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 | Field | Type | Visibility |
 |---|---|---|
 | `log` | `static Logger` | private |
+| `PROJECT_CHANGED_MESSAGE`, `USER_EMAIL_CONSTRAINT`, `PROPOSAL_VERSION_CONSTRAINTS` | constants | private |
 
 **Methods:**
 
@@ -410,6 +411,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ResponseEntity<ApiError> handleMalformed(Exception ex, HttpServletRequest request)`
 - `public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException ex, HttpServletRequest request)`
 - `public ResponseEntity<ApiError> handleConcurrentUpdate(OptimisticLockingFailureException ex, HttpServletRequest request)`
+- `public ResponseEntity<ApiError> handleIntegrityViolation(DataIntegrityViolationException ex, HttpServletRequest request)`: a unique index rejected a write; the answer depends on the constraint and never exposes it
 - `public ResponseEntity<ApiError> handleNoResource(NoResourceFoundException ex, HttpServletRequest request)`
 - `public ResponseEntity<ApiError> handleUnexpected(Exception ex, HttpServletRequest request)`
 
@@ -462,6 +464,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Methods:**
 
+- `public static final String EMAIL_ALREADY_REGISTERED`: the one duplicate-email message, shared by `AuthService`, `UserService` and `GlobalExceptionHandler`
 - `public ValidationException(String message)`
 
 
@@ -2020,7 +2023,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 *class* `implements NotificationChannel` · @Component · `src/main/java/com/prastav/notification/InAppNotificationChannel.java`
 
-**Responsibility.** Strategy pattern: the NotificationChannel that stores the notification in the recipient's inbox.
+**Responsibility.** Strategy pattern: the NotificationChannel that stores the notification in the recipient's inbox. NotificationService#create commits its own transaction, so a returned call means the row is stored.
 
 | Field | Type | Visibility |
 |---|---|---|
@@ -2088,7 +2091,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 *class* · @Component · `src/main/java/com/prastav/notification/NotificationListener.java`
 
-**Responsibility.** Observer pattern. Subscribes to workflow and review events and tells the people involved through NotificationDispatcher: the assigned faculty member hears about an assignment and a resubmission, the student owner hears about every review decision, and a reassignment reaches both the old and the new reviewer. Why: the workflow and review code only publish facts and do not know notifications exist, so a new notification is a new handler here rather than an edit to a service. Handlers run after the publisher's transaction commits and in a transaction of their own, so a notification is only sent for a change that really happened, and a delivery problem can never roll that change back.
+**Responsibility.** Observer pattern. Subscribes to workflow and review events and tells the people involved through NotificationDispatcher: the assigned faculty member hears about an assignment and a resubmission, the student owner hears about every review decision, and a reassignment reaches both the old and the new reviewer. Why: the workflow and review code only publish facts and do not know notifications exist, so a new notification is a new handler here rather than an edit to a service. Handlers run after the publisher's transaction commits, so a notification is only sent for a change that really happened, and a delivery problem can never roll that change back. They hold no transaction themselves: each delivery has its own, so one failure cannot affect another, and no database connection is kept across a retry pause.
 
 | Field | Type | Visibility |
 |---|---|---|
@@ -2099,9 +2102,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Methods:**
 
 - `public NotificationListener(ProjectStore projectStore, UserService userService, NotificationDispatcher dispatcher)`
-- `public void on(ProjectStatusChangedEvent event)`: `@TransactionalEventListener`, `@Transactional(REQUIRES_NEW)`; ASSIGN_REVIEWER notifies the reviewer (REVIEWER_ASSIGNED); SUBMIT from REVISION_REQUESTED notifies the reviewer (RESUBMITTED); any other action is ignored
-- `public void on(ReviewerReassignedEvent event)`: `@TransactionalEventListener`, `@Transactional(REQUIRES_NEW)`; notifies the previous reviewer (REVIEWER_UNASSIGNED), then the new reviewer (REVIEWER_ASSIGNED)
-- `public void on(ReviewRecordedEvent event)`: `@TransactionalEventListener`, `@Transactional(REQUIRES_NEW)`; notifies the project owner (REVIEW_DECISION)
+- `public void on(ProjectStatusChangedEvent event)`: `@TransactionalEventListener`, `@Transactional(NOT_SUPPORTED)`; ASSIGN_REVIEWER notifies the reviewer (REVIEWER_ASSIGNED); SUBMIT from REVISION_REQUESTED notifies the reviewer (RESUBMITTED); any other action is ignored
+- `public void on(ReviewerReassignedEvent event)`: `@TransactionalEventListener`, `@Transactional(NOT_SUPPORTED)`; notifies the previous reviewer (REVIEWER_UNASSIGNED), then the new reviewer (REVIEWER_ASSIGNED)
+- `public void on(ReviewRecordedEvent event)`: `@TransactionalEventListener`, `@Transactional(NOT_SUPPORTED)`; notifies the project owner (REVIEW_DECISION)
 - `private void notify(User recipient, Project project, NotificationType type, String message)`: dispatches a new `Notification`
 
 #### `NotificationProperties`
@@ -2141,7 +2144,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 **Methods:**
 
 - `public NotificationService(NotificationRepository notificationRepository)`
-- `public Notification create(User recipient, Project project, NotificationType type, String message)`: stores an unread notification; `project` may be null
+- `public Notification create(User recipient, Project project, NotificationType type, String message)`: stores an unread notification in its own `REQUIRES_NEW` transaction with `saveAndFlush`, so a failing INSERT throws here; `project` may be null
 - `public Page<Notification> listFor(Actor actor, boolean unreadOnly, Pageable pageable)`: newest first
 - `public Page<Notification> listFor(Actor actor, boolean unreadOnly, int page, int size)`: 400 VALIDATION_FAILED for a negative page or a size outside 1 to 50, otherwise the page above with `PageRequest.of(page, size)`
 - `public long unreadCount(Actor actor)`
@@ -2451,7 +2454,7 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 }
 ```
 
-Rules: `role` is optional and only STUDENT is accepted; the email must be on `prastav.institution.email-domain` and match `prastav.institution.student-email-pattern` (`<firstname>.<YY><branch>`), compared case-insensitively and stored lower-case. A faculty-style email, another domain, another role or a duplicate email returns 400 VALIDATION_FAILED; wrong credentials on login return 401 UNAUTHENTICATED with "Invalid email or password".
+Rules: `role` is optional and only STUDENT is accepted; the email must be on `prastav.institution.email-domain` and match `prastav.institution.student-email-pattern` (`<firstname>.<YY><branch>`), compared case-insensitively and stored lower-case. A faculty-style email, another domain, another role or a duplicate email returns 400 VALIDATION_FAILED, including when two registrations race for one email; wrong credentials on login return 401 UNAUTHENTICATED with "Invalid email or password".
 
 `POST /api/users` (COORDINATOR)
 
@@ -2459,7 +2462,7 @@ Rules: `role` is optional and only STUDENT is accepted; the email must be on `pr
 { "name": "Dr. Kavya Menon", "email": "kavya.menon@nst.rishihood.edu.in", "password": "Password@123", "role": "FACULTY" }
 ```
 
-`201 Created` with `UserResponse` (`admissionYear` and `branch` null). Only the institutional domain is checked, not the student pattern. STUDENT, another domain or a duplicate email returns 400 VALIDATION_FAILED; any other caller role returns 403 FORBIDDEN.
+`201 Created` with `UserResponse` (`admissionYear` and `branch` null). Only the institutional domain is checked, not the student pattern. STUDENT, another domain or a duplicate email, including one lost to a race, returns 400 VALIDATION_FAILED; any other caller role returns 403 FORBIDDEN.
 
 ### 10.2 Create project
 
@@ -2522,7 +2525,7 @@ Rules: `role` is optional and only STUDENT is accepted; the email must be on `pr
 
 `PUT /api/projects/{id}/proposal` with a full `ProposalContent` body (same six fields as above) returns `ProposalVersionResponse`. In SUBMITTED or UNDER_REVIEW it returns 409 `ILLEGAL_TRANSITION` "Action EDIT_DRAFT is not allowed while the project is SUBMITTED". In REVISION_REQUESTED before a new version exists it returns 409 "There is no open draft; create a new version first".
 
-`POST /api/projects/{id}/proposals` (no body) returns `201` with version N+1 in state DRAFT, prefilled from version N. A second call while that draft is open returns 409 "Version 2 is already an open draft".
+`POST /api/projects/{id}/proposals` (no body) returns `201` with version N+1 in state DRAFT, prefilled from version N. A second call while that draft is open returns 409 "Version 2 is already an open draft". When two calls overlap and both pass that check, the second returns 409 `CONCURRENT_UPDATE` and only one version is created.
 
 `GET /api/projects/{id}/proposals` returns all versions oldest first; submitted versions have `"state": "SUBMITTED"` and a `submittedAt`.
 
@@ -2823,6 +2826,7 @@ Expected business errors extend the abstract `PrastavException`, which carries a
 | `HttpMessageNotReadableException`, `MethodArgumentTypeMismatchException`, `MissingServletRequestParameterException` | `handleMalformed` | VALIDATION_FAILED |
 | `AccessDeniedException` from `@PreAuthorize` | `handleAccessDenied` | FORBIDDEN |
 | `OptimisticLockingFailureException` | `handleConcurrentUpdate` | CONCURRENT_UPDATE |
+| `DataIntegrityViolationException` | `handleIntegrityViolation` (`users_email_key`: VALIDATION_FAILED with the duplicate-email message; anything else: 409, logged unless it is a known version race) | VALIDATION_FAILED or CONCURRENT_UPDATE |
 | `NoResourceFoundException` | `handleNoResource` | NOT_FOUND |
 | any other `Exception` | `handleUnexpected` (logged with its stack trace) | INTERNAL_ERROR |
 
@@ -2830,16 +2834,18 @@ Requests rejected before they reach a controller (no token, invalid or expired t
 
 An exception in a `@Transactional` service rolls the transaction back, and the audit rows with it, because `AuditEventListener` runs inside that transaction. Failures after the commit are different: `NotificationDispatcher` catches a failing channel and logs it, so the caller still gets its success response.
 
+`handleIntegrityViolation` covers a request that passed its checks and then lost a race to a unique index. It chooses its answer from the constraint name, and that name, the SQL and the driver's message stay in the log, never in the response.
+
 ### 11.2 Error codes
 
 | Code | HTTP | Raised by | Example |
 |---|---|---|---|
-| VALIDATION_FAILED | 400 | `@Valid` failures (with `fieldErrors`), malformed JSON, UUID, enum or date, `ValidationException` (incomplete proposal, missing review comments, non-faculty assignee, reassignment to the current reviewer, non-student registration, email outside the institutional domain or student pattern, duplicate email, paging out of range, comparing a version with itself, audit `from` after `to`) | `fieldErrors: [{ "field": "title", "message": "must not be blank" }]` |
+| VALIDATION_FAILED | 400 | `@Valid` failures (with `fieldErrors`), malformed JSON, UUID, enum or date, `ValidationException` (incomplete proposal, missing review comments, non-faculty assignee, reassignment to the current reviewer, non-student registration, email outside the institutional domain or student pattern, duplicate email (from the check or from `users_email_key` when two requests race), paging out of range, comparing a version with itself, audit `from` after `to`) | `fieldErrors: [{ "field": "title", "message": "must not be blank" }]` |
 | UNAUTHENTICATED | 401 | `RestAuthErrorHandler.commence` (no/invalid/expired token), `UnauthenticatedException` (bad login) | "Authentication required: send a valid Bearer token" |
 | FORBIDDEN | 403 | `@PreAuthorize` denial, `ForbiddenException` from `ProjectAccessPolicy`, `Guards` or the services | "Only the assigned reviewer can review this project" |
 | NOT_FOUND | 404 | `NotFoundException`, a path with no endpoint | "Project 0b8f... not found" |
 | ILLEGAL_TRANSITION | 409 | `IllegalTransitionException`, `ConflictException` (edit submitted version, second open draft, stale versionNumber, resubmit without new version, no submitted version to review) | "Action APPROVE is not allowed while the project is SUBMITTED" |
-| CONCURRENT_UPDATE | 409 | `OptimisticLockingFailureException` on `Project.version` | "The project was changed by someone else at the same time. Reload and try again." |
+| CONCURRENT_UPDATE | 409 | `OptimisticLockingFailureException` on `Project.version`; `DataIntegrityViolationException` from `uq_proposal_project_version` or `ux_proposal_one_open_draft`; any other `DataIntegrityViolationException` ("The request conflicts with a change made at the same time. Reload and try again.") | "The project was changed by someone else at the same time. Reload and try again." |
 | INTERNAL_ERROR | 500 | anything unexpected (logged with stack trace, never returned) | "Unexpected server error" |
 
 ### 11.3 Validation rules
@@ -2910,7 +2916,7 @@ Tests:
 
 The test suite has no database, so `ConcurrentSubmissionWebTest` uses a store that behaves as `@Version` does: each request loads its own copy and the first save wins. The behaviour of the real column is not exercised by `mvn test`.
 
-The lock covers `Project` only. Operations that do not save a project behave differently (section 15.2).
+The lock covers `Project` only. Operations that do not save a project rely on unique indexes or are last-write-wins (section 15.2).
 
 ## 12. Security design
 
@@ -2948,7 +2954,7 @@ The lock covers `Project` only. Operations that do not save a project behave dif
 | Strategy (review decisions) | `ReviewDecisionHandler`, `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`, looked up by `ReviewService` | Each decision triggers a different transition; a lookup by decision replaces a `switch` in the service |
 | Strategy (notification channels) | `NotificationChannel`, `InAppNotificationChannel`, `EmailNotificationChannel`, chosen by `NotificationDispatcher` from `prastav.notification.enabled-channels` | Delivery routes are chosen by configuration, and a new route is a new class |
 | Strategy (email policy) | `EmailPolicy`, `PatternEmailPolicy`, used by `AuthService`, `UserService` and `DemoDataSeeder` | Address rules differ per institution; the services must not know them |
-| Decorator | `RetryingNotificationChannel` wrapping every channel enabled in `NotificationDispatcher` | Retrying is added around any channel without changing it, and every channel is retried the same way. It sees only failures thrown during `deliver` (section 15.2) |
+| Decorator | `RetryingNotificationChannel` wrapping every channel enabled in `NotificationDispatcher` | Retrying is added around any channel without changing it, and every channel is retried the same way. Because `NotificationService.create` flushes in its own transaction, a failing INSERT is one of those failures |
 | Factory | `ProjectStateFactory` (status to state, fails at startup if a status is missing or claimed twice), `ProposalVersionFactory` (v1, and vN+1 prefilled from vN) | Lookup and creation rules live in one place: version numbering cannot be bypassed, and callers never pick a state class |
 | Builder | `AuditLog.builder()` / `AuditLog.Builder` | An audit entry has six fields, several optional; named steps read better than a long constructor, and `build` checks the required ones |
 | Facade | `WorkflowService` | One small API over states, persistence and events, so every status change takes the same audited path in one transaction |
@@ -2979,7 +2985,8 @@ One named class per principle. The same reasoning applies across the codebase.
 | Modular monolith | Microservices | One team, one database, simple transactions; modules can be split later along the same boundaries | Discipline needed to respect module boundaries |
 | State pattern | Enum + switch | Open/closed, one class per status, isolated tests | More classes; reading the flow means opening several files (mitigated by the diagrams) |
 | Synchronous `@EventListener` for audit | `@TransactionalEventListener(AFTER_COMMIT)`, outbox | Audit must be exactly as durable as the change: same transaction | A failing audit insert rolls back the business change (acceptable: audit is mandatory) |
-| `@TransactionalEventListener` (after commit, `REQUIRES_NEW`) for notifications | Synchronous `@EventListener`, outbox | Nobody is notified about a change that rolled back, and a delivery failure or retry pause never rolls back or holds the business transaction | A crash between the commit and the dispatch loses that notification (no outbox) |
+| `@TransactionalEventListener` (after commit) for notifications, with one `REQUIRES_NEW` transaction per delivery attempt | Synchronous `@EventListener`, outbox, one transaction around all deliveries | Nobody is notified about a change that rolled back; a delivery failure never rolls back the business change, and one failed attempt cannot affect the next attempt or another recipient | A crash between the commit and the dispatch loses that notification (no outbox); a notification that fails every attempt is logged, not stored |
+| `hibernate.connection.handling_mode: DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION` | Spring's default of holding the connection until the transaction's synchronizations finish; a larger pool | After-commit delivery needs a connection of its own. Holding the request's connection let a burst of requests exhaust the pool while each waited for a second one, and the waiting requests then failed. Returning it at commit removes that wait | A transaction can no longer set a custom isolation level; none does |
 | Immutable versions + DB trigger | Edit in place with history table | Reviews must judge exactly the submitted text; defence in depth | Each revision duplicates text (tiny) |
 | Single reviewer per project | Reviewer panel | One accountable reviewer keeps the workflow simple | Two-reviewer rule needs a policy change (see INTERVIEW_PREP) |
 | Proposal as text fields + link | File upload | No file storage; fields can be validated and compared one by one | Formatting is plain text |
@@ -2998,17 +3005,15 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 
 The backend tests run without a database, so JPQL, Flyway migrations and the real `@Version` column are not exercised by `mvn test`.
 
-**A failed in-app notification insert is not retried.** `NotificationService.create` joins the listener's transaction and does not flush, so the INSERT runs when that transaction commits, after `RetryingNotificationChannel` and `NotificationDispatcher` have returned. A database failure there is logged by Spring and that inbox row is lost, with no retry and no dispatcher warning. A failure thrown during `deliver` is attempted again but marks the shared transaction rollback-only, so the row is lost in that case too. The committed business change is never affected, and `EmailNotificationChannel` is not affected.
+A notification that fails every attempt is logged at WARN and not stored; it is not queued for later.
 
-**Only `Project` has a version column.** Concurrent operations that do not save a project are not turned into `CONCURRENT_UPDATE`:
+**Only `Project` has a version column.** Concurrent operations that do not save a project are handled by unique indexes or are last-write-wins:
 
 | Simultaneous requests | Result | Data |
 |---|---|---|
-| Two `POST /api/projects/{id}/proposals` | One 201; the other 500 `INTERNAL_ERROR` when both pass the open-draft check (`uq_proposal_project_version` rejects the second), otherwise 409 `ILLEGAL_TRANSITION` | One new version |
-| Two registrations with one email | One 201, one 500 `INTERNAL_ERROR` (`users_email_key` rejects the second) | One account |
-| Two `PUT /api/projects/{id}/proposal` | Both 200; the last write wins | One draft, holding the later content |
-
-`DataIntegrityViolationException` has no handler of its own, so it reaches `GlobalExceptionHandler.handleUnexpected`. The database constraints keep the data correct in each case.
+| Two `POST /api/projects/{id}/proposals` | One 201; the other 409 `CONCURRENT_UPDATE` when both pass the open-draft check (`uq_proposal_project_version` rejects the second), otherwise 409 `ILLEGAL_TRANSITION` | One new version |
+| Two registrations with one email | One 201; the other 400 `VALIDATION_FAILED` "Email is already registered", the same answer as the check before the insert | One account |
+| Two `PUT /api/projects/{id}/proposal` | Both 200; the last write wins, which is acceptable because a draft has one author | One draft, holding the later content |
 
 ## 16. Testing design
 
@@ -3042,17 +3047,18 @@ The backend tests run without a database, so JPQL, Flyway migrations and the rea
 | `InstitutionConfigTest` | the shipped `application.yml` binds `InstitutionProperties` and parses a demo student email |
 | `AuthServiceTest` | student registration stores admission year and branch; omitted role means STUDENT; FACULTY and COORDINATOR, faculty-style email, other domain and duplicate email rejected |
 | `UserServiceTest` | coordinator creates FACULTY and COORDINATOR without the student pattern; other callers 403; STUDENT, other domain and duplicate email rejected |
-| `ProposalControllerWebTest` (MockMvc, `@WebMvcTest`) | compare body (`fromVersion`, `toVersion`, `fields[]`); 404, 400 and 403 error bodies; missing or non-numeric version 400 without calling the service; 401 without token; an empty field is returned as null rather than left out |
-| `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400 |
-| `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; page and size passed to the repository, negative page and size 0 or 51 rejected; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project |
+| `ProposalControllerWebTest` (MockMvc, `@WebMvcTest`) | compare body (`fromVersion`, `toVersion`, `fields[]`); 404, 400 and 403 error bodies; missing or non-numeric version 400 without calling the service; 401 without token; an empty field is returned as null rather than left out; simultaneous next-version requests give the loser 409 with no database detail |
+| `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400; losing an account-creation race answers like the duplicate-email check |
+| `AuthControllerWebTest` (MockMvc, `@WebMvcTest`) | the duplicate-email check and losing a registration race to the unique index give the client the same 400 |
+| `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; page and size passed to the repository, negative page and size 0 or 51 rejected; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project; create flushes with `saveAndFlush` |
 | `NotificationListenerTest` | assignment notifies the assigned faculty (REVIEWER_ASSIGNED); resubmission from REVISION_REQUESTED notifies the faculty with the version (RESUBMITTED); a first submission and a decision's status change notify nobody; each of the three decisions notifies the student owner with its message (REVIEW_DECISION); reassignment notifies the previous reviewer (REVIEWER_UNASSIGNED) and the new reviewer (REVIEWER_ASSIGNED) |
 | `NotificationDispatcherTest` | every enabled channel called in configured order; a throwing channel is retried up to max attempts and does not stop the others; every channel is wrapped in the retry decorator; a channel left out of the configuration is never called; unknown channel name rejected |
-| `NotificationChannelTest` | in-app channel stores through `NotificationService.create`; email channel only logs; the shipped `application.yml` enables `in-app` and `email` with 3 attempts and a 200ms delay |
+| `NotificationChannelTest` | in-app channel stores through `NotificationService.create`; email channel only logs; the shipped `application.yml` enables `in-app` and `email` with 3 attempts and a 200ms delay; the shipped `application.yml` returns the connection at commit |
 | `RetryingNotificationChannelTest` | no retry on success; succeeds on a later attempt; gives up after max attempts and rethrows the last failure; keeps the wrapped name; at least one attempt required; a single attempt does not retry; pauses between attempts; an interrupt during the pause stops retrying and keeps the interrupt flag; an `Error` is not retried; delegate and delay required |
 | `NotificationControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; each of the three roles lists its own inbox with default paging and the page envelope; `unread`, `page` and `size` bound; out-of-range size 400 from the service; malformed page or id 400 without calling the service; unread count; recipient marks one read; another user's notification 403; unknown id 404; read-all returns the changed count |
-| `NotificationFlowTest` (small Spring context, real transaction lifecycle, repositories mocked) | real `WorkflowService`, listener, dispatcher, retry decorator, channels and `NotificationService`: assignment, resubmission, reassignment and review decision reach the right recipients through both channels; a first submission stores nothing; nothing is sent before commit, after a rollback, after a commit lost to an optimistic lock or after a refused transition; a throwing inbox write is attempted again; an inbox that keeps failing never undoes the change or stops email |
+| `NotificationFlowTest` (small Spring context, real transaction lifecycle, repositories mocked) | real `WorkflowService`, listener, dispatcher, retry decorator, channels and `NotificationService`: assignment, resubmission, reassignment and review decision reach the right recipients through both channels; a first submission stores nothing; nothing is sent before commit, after a rollback, after a commit lost to an optimistic lock or after a refused transition; the transaction manager models JPA (`save` writes at commit, `saveAndFlush` at once, rollback discards): a failed insert is retried and the next attempt stores the row; when every attempt fails nothing is stored, one failure is logged, and the change and audit entry stay committed; one recipient failing does not stop the other notification of the event or a later event |
 | `ProjectAccessPolicyTest` | a reassignment moves view access from the previous to the new reviewer; owner and coordinator keep it |
-| `GlobalExceptionHandlerTest` | `OptimisticLockingFailureException` and its JPA subclass become 409 `CONCURRENT_UPDATE` with the standard message and path |
+| `GlobalExceptionHandlerTest` | `OptimisticLockingFailureException` and its JPA subclass become 409 `CONCURRENT_UPDATE` with the standard message and path; a version race on either constraint is 409 `CONCURRENT_UPDATE`; `users_email_key` answers like the duplicate-email check; any other integrity violation, with or without a constraint name, is 409; no response contains SQL or a constraint name |
 | `ConcurrentSubmissionWebTest` (MockMvc, `@WebMvcTest`, real `WorkflowService`, version-checking store) | two simultaneous submissions give one 200 and one 409 `CONCURRENT_UPDATE` with one event published; a submission arriving after the first committed is 409 `ILLEGAL_TRANSITION`; a reassignment losing a race is 409 `CONCURRENT_UPDATE`; `Project.version` carries `@Version` |
 | `DashboardControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 200 with counts, awaiting-assignment rows (id, owner, waitingSince) and reviewer workload; student and faculty 403 `FORBIDDEN` without calling the service; 401 `UNAUTHENTICATED` without token; an empty summary keeps every list and count; a faculty member with no open review appears with zero |
 | `ProjectControllerWebTest` (MockMvc, `@WebMvcTest`) | 401 without token; 403 for a student calling assign; 409 body for an illegal transition; list filter binding (including `admissionYear` and `branch`) and the page envelope (`content`, `page`, `size`, `totalElements`, `totalPages`); defaults for a call without parameters; 400 `VALIDATION_FAILED` for an unknown status or sort, a malformed reviewer id, a negative or non-numeric page, a non-numeric admission year and size 0 or 51; 403 for a student batch filter; summary body; `PUT /{id}/assign` calls `reassignReviewer` for the coordinator, 403 for student and faculty, 400 without `facultyId`, 409 ILLEGAL_TRANSITION body outside UNDER_REVIEW; repeated status parameters; blank search and branch are no filters; a page past the end is empty but keeps the totals |

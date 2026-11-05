@@ -106,9 +106,9 @@ Version 1 is the original submission, so versions 2, 3 and 4 are the three resub
 
 How it works today (LLD section 6.1):
 
-1. `notification/NotificationListener.java` is a `@TransactionalEventListener` (after commit, `REQUIRES_NEW`) on `ProjectStatusChangedEvent` and `ReviewRecordedEvent`: ASSIGN_REVIEWER notifies the reviewer, a SUBMIT out of REVISION_REQUESTED notifies the reviewer, every review decision notifies the student owner.
+1. `notification/NotificationListener.java` is a `@TransactionalEventListener` (after commit, with no transaction of its own) on `ProjectStatusChangedEvent` and `ReviewRecordedEvent`: ASSIGN_REVIEWER notifies the reviewer, a SUBMIT out of REVISION_REQUESTED notifies the reviewer, every review decision notifies the student owner.
 2. It calls `NotificationDispatcher.dispatch`, which runs every channel named in `prastav.notification.enabled-channels`, each wrapped in `RetryingNotificationChannel`.
-3. `InAppNotificationChannel` stores the row through `NotificationService.create`; `EmailNotificationChannel` writes the email to the log.
+3. `InAppNotificationChannel` stores the row through `NotificationService.create`, which has its own `REQUIRES_NEW` transaction and flushes, so a failing insert is retried; `EmailNotificationChannel` writes the email to the log.
 4. `notification/web/NotificationController.java` serves the caller's inbox: `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/{id}/read`, `PATCH /api/notifications/read-all`.
 
 To add a channel (for example SMS): one `@Component` implementing `NotificationChannel` with `name()` returning `sms`, then add `sms` to `NOTIFICATION_CHANNELS`. It is retried like the others. **No workflow, project, proposal, review or listener class changes.** That is the live demonstration of Open/Closed.
