@@ -67,19 +67,19 @@ export function useProjectListParams(defaults: Defaults = {}) {
     size: PAGE_SIZE,
   };
 
+  // Several updates can land before the router renders again (Clear filters, two search boxes settling together),
+  // so each one builds on the previous update and not on the params of the last render.
+  const latest = useRef(searchParams);
+  latest.current = searchParams;
   const update: Update = (patch) => {
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        for (const [key, value] of Object.entries(patch)) {
-          if (value) next.set(key, value);
-          else next.delete(key);
-        }
-        if (!('page' in patch)) next.delete('page');
-        return next;
-      },
-      { replace: true },
-    );
+    const next = new URLSearchParams(latest.current);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    }
+    if (!('page' in patch)) next.delete('page');
+    latest.current = next;
+    setSearchParams(next, { replace: true });
   };
 
   // The text inputs are local so typing stays smooth.

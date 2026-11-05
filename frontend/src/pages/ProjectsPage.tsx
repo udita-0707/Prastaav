@@ -126,7 +126,9 @@ function ProjectsList({ user, mode }: { user: UserResponse; mode: Mode }) {
   const { params, search, setSearch, branch, setBranch, setStatus, setReviewer, setAdmissionYear, setSort, setPage } = useProjectListParams(
     isReviews ? { status: ['UNDER_REVIEW'], sort: 'OLDEST' } : {},
   );
-  const projects = useQuery({ queryKey: ['projects', 'list', params], queryFn: () => listProjects(params), placeholderData: keepPreviousData });
+  // The reviews list always means Under Review, whatever a link says: it has no status filter to change it back.
+  const query = isReviews ? { ...params, status: ['UNDER_REVIEW' as const] } : params;
+  const projects = useQuery({ queryKey: ['projects', 'list', query], queryFn: () => listProjects(query), placeholderData: keepPreviousData });
   const faculty = useQuery({ queryKey: ['faculty'], queryFn: listFaculty, enabled: role === 'COORDINATOR' });
   const [assignTarget, setAssignTarget] = useState<AssignTarget | null>(null);
 
