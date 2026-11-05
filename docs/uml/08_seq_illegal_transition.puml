@@ -5,6 +5,7 @@ autonumber
 actor Faculty
 participant "ReviewController" as RC
 participant "ReviewService" as RS
+participant "ProposalService" as PRS
 participant "ApproveDecisionHandler" as AH
 participant "WorkflowService" as WS
 participant "ProjectStateFactory" as PSF
@@ -12,16 +13,18 @@ participant "SubmittedState" as SS
 participant "GlobalExceptionHandler" as GEH
 database PostgreSQL as DB
 
-Faculty -> RC : POST /api/projects/{id}/reviews {decision: APPROVE}
-RC -> RS : recordReview(id, APPROVE, null, null, actor)
-RS -> AH : apply(id, actor, null)
-AH -> WS : approve(id, actor)
+Faculty -> RC : POST /api/projects/{id}/reviews {decision APPROVE}
+RC -> RS : recordReview(projectId, APPROVE, null, null, actor)
+RS -> PRS : findLatestSubmitted(projectId)
+PRS --> RS : v1
+RS -> AH : apply(projectId, actor, null)
+AH -> WS : approve(projectId, actor)
 WS -> PSF : stateOf(SUBMITTED)
 PSF --> WS : SubmittedState
 WS -> SS : approve(project, actor)
-SS --> WS : throws IllegalTransitionException\n(SUBMITTED, APPROVE)\n(inherited default method)
-note over WS, DB : No save, no event, no review row:\nthe @Transactional method rolls back.
-WS --> RC : exception propagates
-RC -> GEH : handleBusiness(ex)
-GEH --> Faculty : 409 {code: ILLEGAL_TRANSITION,\nmessage: "Action APPROVE is not allowed\nwhile the project is SUBMITTED"}
+SS --> WS : throws IllegalTransitionException(SUBMITTED, APPROVE), the inherited default method
+note over WS, DB : No save, no event, no review row: the transaction rolls back
+WS --> RC : the exception propagates
+RC -> GEH : handleBusiness(ex, request)
+GEH --> Faculty : 409 {code ILLEGAL_TRANSITION, message Action APPROVE is not allowed while the project is SUBMITTED}
 @enduml

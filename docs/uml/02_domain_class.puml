@@ -3,12 +3,19 @@
 title Prastav - Domain model (entities and value types)
 hide empty members
 
+interface "Persistable<UUID>" as Persistable {
+  + isNew() : boolean
+}
+
 abstract class BaseEntity {
   - id : UUID
   - createdAt : Instant
   - newEntity : boolean
   + getId() : UUID
+  + getCreatedAt() : Instant
   + isNew() : boolean
+  + equals(other : Object) : boolean
+  + hashCode() : int
 }
 
 class User {
@@ -20,29 +27,13 @@ class User {
   - branch : String
   + {static} student(name : String, studentEmail : StudentEmail, passwordHash : String) : User
   + toActor() : Actor
+  + getRole() : Role
 }
 
 class StudentEmail <<record>> {
   email : String
   admissionYear : int
   branch : String
-}
-
-interface EmailPolicy <<Strategy>> {
-  + requireInstitutional(email : String) : String
-  + requireStudent(email : String) : StudentEmail
-}
-
-class PatternEmailPolicy {
-  - institution : InstitutionProperties
-  - domainSuffix : String
-  - studentLocalPart : Pattern
-}
-
-class InstitutionProperties <<record>> {
-  name : String
-  emailDomain : String
-  studentEmailPattern : String
 }
 
 enum Role {
@@ -65,6 +56,7 @@ class Project {
   + assignReviewer(faculty : User)
   + isOwnedBy(userId : UUID) : boolean
   + isReviewedBy(userId : UUID) : boolean
+  + getVersion() : Long
 }
 
 enum ProjectStatus {
@@ -135,6 +127,8 @@ class Review {
   - reviewer : User
   - decision : ReviewDecision
   - comments : String
+  + getDecision() : ReviewDecision
+  + getProposalVersion() : ProposalVersion
 }
 
 enum ReviewDecision {
@@ -151,6 +145,16 @@ class AuditLog {
   - toStatus : ProjectStatus
   - details : String
   + {static} builder() : AuditLog.Builder
+}
+
+class "AuditLog.Builder" as AuditLogBuilder {
+  + projectId(projectId : UUID) : Builder
+  + actorId(actorId : UUID) : Builder
+  + action(action : AuditAction) : Builder
+  + fromStatus(fromStatus : ProjectStatus) : Builder
+  + toStatus(toStatus : ProjectStatus) : Builder
+  + details(details : String) : Builder
+  + build() : AuditLog
 }
 
 enum AuditAction {
@@ -172,6 +176,7 @@ class Notification {
   - read : boolean
   + markRead()
   + isAddressedTo(userId : UUID) : boolean
+  + isRead() : boolean
 }
 
 enum NotificationType {
@@ -181,33 +186,45 @@ enum NotificationType {
   RESUBMITTED
 }
 
+Persistable <|.. BaseEntity
 BaseEntity <|-- User
 BaseEntity <|-- Project
 BaseEntity <|-- ProposalVersion
 BaseEntity <|-- Review
 BaseEntity <|-- AuditLog
 BaseEntity <|-- Notification
-
-User --> Role
-User ..> StudentEmail : student()
-EmailPolicy <|.. PatternEmailPolicy
-PatternEmailPolicy --> InstitutionProperties
-EmailPolicy ..> StudentEmail : parses
 Project "*" --> "1" User : owner
 Project "*" --> "0..1" User : reviewer
-Project --> ProjectStatus
 Project "1" *-- "1..*" ProposalVersion : versions
-ProposalVersion --> ProposalVersionState
-ProposalVersion ..> ProposalContent : creates/reads
-ProposalVersion "1" -- "*" Review : reviewed in
-ProposalDiffService ..> ProposalVersion : compares two
-ProposalDiffService ..> ProposalDiff : creates
-ProposalDiff "1" *-- "6" FieldDiff : fields
-Review --> ReviewDecision
+Project "1" o-- "*" Review : reviews
+Project "0..1" o-- "*" AuditLog : projectId
+Review "*" --> "1" ProposalVersion : proposalVersion
 Review "*" --> "1" User : reviewer
-AuditLog --> AuditAction
-AuditLog ..> Project : projectId
+AuditLog "*" --> "1" User : actorId
+ProposalVersion "*" --> "1" User : createdBy
 Notification "*" --> "1" User : recipient
 Notification "*" --> "0..1" Project : project
-Notification --> NotificationType
+User "*" --> "1" Role : role
+Project "*" --> "1" ProjectStatus : status
+ProposalVersion "*" --> "1" ProposalVersionState : state
+Review "*" --> "1" ReviewDecision : decision
+AuditLog "*" --> "1" AuditAction : action
+AuditLog "*" --> "0..2" ProjectStatus : fromStatus, toStatus
+Notification "*" --> "1" NotificationType : type
+ProposalDiff "1" *-- "6" FieldDiff : fields
+User ..> StudentEmail : student()
+ProposalVersion ..> ProposalContent : content()
+ProposalDiffService ..> ProposalVersion : compares two
+ProposalDiffService ..> ProposalDiff : creates
+AuditLogBuilder ..> AuditLog : build()
+
+note right of ProposalVersion
+  Composition: a version is created with and for one project,
+  and project_id is NOT NULL. Immutable once SUBMITTED.
+end note
+
+note right of AuditLog
+  projectId and actorId are plain UUIDs, not JPA relations.
+  A database trigger makes the table append-only.
+end note
 @enduml

@@ -1,0 +1,47 @@
+@startuml 09_seq_notification_dispatch
+!include _style.iuml
+title Sequence - Notification dispatch after a review decision
+autonumber
+participant "ReviewService" as RS
+participant "AuditEventListener" as AEL
+participant "NotificationListener" as NL
+participant "ProjectStore" as ST
+participant "NotificationDispatcher" as ND
+participant "RetryingNotificationChannel" as RNC
+participant "InAppNotificationChannel" as IA
+participant "NotificationService" as NS
+participant "EmailNotificationChannel" as EC
+database PostgreSQL as DB
+
+RS -> DB : save Review
+RS -> AEL : ReviewRecordedEvent, handled now in the same transaction
+AEL -> DB : insert audit REVIEW_RECORDED
+note over RS, NL : Spring holds the event for NotificationListener until the transaction ends
+alt the transaction commits
+RS -> NL : on(ReviewRecordedEvent) after commit, in a new REQUIRES_NEW transaction
+NL -> ST : getById(projectId)
+ST --> NL : Project
+NL -> NL : new Notification(owner, project, REVIEW_DECISION, message)
+NL -> ND : dispatch(notification)
+loop each enabled channel in configured order
+ND -> RNC : deliver(notification)
+alt channel in-app
+loop up to maxAttempts while delivery throws, pausing delay between attempts
+RNC -> IA : deliver(notification)
+IA -> NS : create(recipient, project, type, message)
+NS -> NS : notificationRepository.save, not flushed yet
+end
+else channel email
+loop up to maxAttempts while delivery throws, pausing delay between attempts
+RNC -> EC : deliver(notification)
+EC -> EC : log.info of the message that would be mailed
+end
+end
+RNC --> ND : returns, or rethrows the last failure, which NotificationDispatcher logs at WARN before the next channel
+end
+NL -> DB : commit of the REQUIRES_NEW transaction: INSERT into notifications
+note over NL, DB : This INSERT runs after the retry decorator has returned, so a failed INSERT is not retried. Spring logs it and that inbox row is lost. The committed review is not affected.
+else the transaction rolls back
+note over RS, NL : NotificationListener is not called and nobody is notified
+end
+@enduml

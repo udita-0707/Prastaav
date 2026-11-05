@@ -1,0 +1,100 @@
+@startuml 14_auth_classes
+!include _style.iuml
+title Prastav - Auth view: accounts, JWT and the institution email policy (Strategy)
+hide empty members
+
+class User {
+  - name : String
+  - email : String
+  - passwordHash : String
+  - role : Role
+  - admissionYear : Integer
+  - branch : String
+  + {static} student(name : String, studentEmail : StudentEmail, passwordHash : String) : User
+  + toActor() : Actor
+}
+
+enum Role {
+  STUDENT
+  FACULTY
+  COORDINATOR
+}
+
+class Actor <<record>> {
+  userId : UUID
+  role : Role
+  + hasRole(expected : Role) : boolean
+}
+
+interface EmailPolicy <<Strategy>> {
+  + requireInstitutional(email : String) : String
+  + requireStudent(email : String) : StudentEmail
+}
+
+class PatternEmailPolicy {
+  - institution : InstitutionProperties
+  - domainSuffix : String
+  - studentLocalPart : Pattern
+  + requireInstitutional(email : String) : String
+  + requireStudent(email : String) : StudentEmail
+}
+
+class InstitutionProperties <<record>> {
+  name : String
+  emailDomain : String
+  studentEmailPattern : String
+}
+
+class StudentEmail <<record>> {
+  email : String
+  admissionYear : int
+  branch : String
+}
+
+class AuthService {
+  - emailPolicy : EmailPolicy
+  + register(name : String, email : String, password : String, role : Role) : AuthResult
+  + login(email : String, password : String) : AuthResult
+}
+
+class UserService {
+  - emailPolicy : EmailPolicy
+  + getById(id : UUID) : User
+  + listByRole(role : Role) : List<User>
+  + createAccount(actor : Actor, name : String, email : String, password : String, role : Role) : User
+}
+
+class DemoDataSeeder {
+  - emailPolicy : EmailPolicy
+  + run(args : ApplicationArguments)
+}
+
+class JwtService {
+  + generateToken(user : User) : String
+  + parse(token : String) : Optional<Actor>
+}
+
+class AuthResult <<record>> {
+  token : String
+  user : User
+}
+
+EmailPolicy <|.. PatternEmailPolicy
+PatternEmailPolicy "1" --> "1" InstitutionProperties : institution
+AuthService "1" --> "1" EmailPolicy : requireStudent()
+UserService "1" --> "1" EmailPolicy : requireInstitutional()
+DemoDataSeeder "1" --> "1" EmailPolicy : emailPolicy
+AuthService "1" --> "1" JwtService : jwtService
+EmailPolicy ..> StudentEmail : parses
+User ..> StudentEmail : student()
+User ..> Actor : toActor()
+JwtService ..> Actor : parse()
+AuthService ..> AuthResult : returns
+User "*" --> "1" Role : role
+Actor "*" --> "1" Role : role
+
+note right of EmailPolicy
+  Another naming scheme is a new implementation;
+  the services depend only on this interface.
+end note
+@enduml

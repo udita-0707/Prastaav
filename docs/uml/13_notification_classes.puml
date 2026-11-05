@@ -1,0 +1,112 @@
+@startuml 13_notification_classes
+!include _style.iuml
+title Prastav - Notifications: listener, dispatcher, channels (Strategy) and retries (Decorator)
+hide empty members
+
+class NotificationListener <<Observer>> {
+  - projectStore : ProjectStore
+  - userService : UserService
+  - dispatcher : NotificationDispatcher
+  + on(event : ProjectStatusChangedEvent)
+  + on(event : ReviewerReassignedEvent)
+  + on(event : ReviewRecordedEvent)
+}
+
+class NotificationDispatcher {
+  - enabledChannels : List<NotificationChannel>
+  + dispatch(notification : Notification)
+}
+
+interface NotificationChannel <<Strategy>> {
+  + name() : String
+  + deliver(notification : Notification)
+}
+
+class InAppNotificationChannel {
+  + {static} NAME : String
+  - notificationService : NotificationService
+  + name() : String
+  + deliver(notification : Notification)
+}
+
+class EmailNotificationChannel {
+  + {static} NAME : String
+  + name() : String
+  + deliver(notification : Notification)
+}
+
+class RetryingNotificationChannel <<Decorator>> {
+  - delegate : NotificationChannel
+  - maxAttempts : int
+  - delay : Duration
+  + name() : String
+  + deliver(notification : Notification)
+}
+
+class NotificationProperties <<record>> {
+  enabledChannels : List<String>
+  retry : Retry
+}
+
+class "NotificationProperties.Retry" as NotificationPropertiesRetry <<record>> {
+  maxAttempts : int
+  delay : Duration
+}
+
+class NotificationService {
+  - notificationRepository : NotificationRepository
+  + create(recipient : User, project : Project, type : NotificationType, message : String) : Notification
+  + unreadCount(actor : Actor) : long
+  + markRead(notificationId : UUID, actor : Actor) : Notification
+  + markAllRead(actor : Actor) : int
+}
+
+interface NotificationRepository {
+  + countByRecipientIdAndReadFalse(recipientId : UUID) : long
+  + markAllReadFor(recipientId : UUID) : int
+}
+
+class Notification {
+  - recipient : User
+  - project : Project
+  - type : NotificationType
+  - message : String
+  - read : boolean
+  + markRead()
+  + isAddressedTo(userId : UUID) : boolean
+}
+
+enum NotificationType {
+  REVIEWER_ASSIGNED
+  REVIEWER_UNASSIGNED
+  REVIEW_DECISION
+  RESUBMITTED
+}
+
+NotificationListener "1" --> "1" NotificationDispatcher : dispatcher
+NotificationDispatcher "1" o--> "*" NotificationChannel : enabledChannels
+NotificationChannel <|.. InAppNotificationChannel
+NotificationChannel <|.. EmailNotificationChannel
+NotificationChannel <|.. RetryingNotificationChannel
+RetryingNotificationChannel "1" o--> "1" NotificationChannel : delegate
+NotificationDispatcher ..> RetryingNotificationChannel : wraps each enabled channel
+NotificationDispatcher ..> NotificationProperties : enabled-channels, retry
+NotificationProperties "1" *-- "1" NotificationPropertiesRetry : retry
+InAppNotificationChannel "1" --> "1" NotificationService : notificationService
+NotificationService "1" --> "1" NotificationRepository : notificationRepository
+NotificationListener ..> Notification : creates
+NotificationRepository ..> Notification : stores
+Notification "*" --> "1" NotificationType : type
+
+note right of NotificationListener
+  After commit, REQUIRES_NEW.
+  ASSIGN_REVIEWER and SUBMIT from REVISION_REQUESTED: reviewer.
+  Review decision: owner.
+  Reassignment: previous and new reviewer.
+end note
+
+note right of RetryingNotificationChannel
+  Retries a delivery that throws. The last failure is rethrown,
+  and the dispatcher logs it and moves to the next channel.
+end note
+@enduml

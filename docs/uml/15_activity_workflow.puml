@@ -1,0 +1,32 @@
+@startuml 15_activity_workflow
+!include _style.iuml
+title Activity - Submit, assign, review, revise or approve
+
+|Student|
+start
+:Create project with draft v1;
+repeat
+  :Edit the draft;
+  :Submit the proposal;
+repeat while (Required fields filled?) is (no, 400 VALIDATION_FAILED) not (yes)
+|Coordinator|
+:Project is SUBMITTED, assign a FACULTY reviewer;
+|Faculty|
+repeat
+  :Project is UNDER_REVIEW, review the latest submitted version;
+  note right: The coordinator can reassign the reviewer here, the status stays UNDER_REVIEW
+  switch (Decision)
+  case (APPROVE)
+    :Project is APPROVED;
+    stop
+  case (REJECT, comments mandatory)
+    :Project is REJECTED;
+    stop
+  case (REQUEST_REVISION, comments mandatory)
+    |Student|
+    :Project is REVISION_REQUESTED, read the feedback;
+    :Create version vN+1, prefilled from vN;
+    :Edit the draft and resubmit;
+  endswitch
+repeat while (Required fields filled, returns to the same reviewer)
+@enduml
