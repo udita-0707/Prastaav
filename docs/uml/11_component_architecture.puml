@@ -3,23 +3,22 @@
 title Prastav - Component / architecture (modular monolith)
 
 node "Browser" {
-  component "prastav-frontend\n(React + TS, Vite,\nTanStack Query, Axios)" as FE
+  component "prastav-frontend\n(React + TS, Vite, TanStack Query, Axios)" as FE
 }
 
 node "prastav-backend (Spring Boot 3, Java 17)" {
-  component "Security\n(JwtAuthenticationFilter,\nSecurityConfig, @PreAuthorize)" as SEC
+  component "Security\n(JwtAuthenticationFilter, SecurityConfig, @PreAuthorize)" as SEC
   package "web layer" {
-    component "Controllers + DTO mappers\n(Auth, User, Project, Dashboard,\nProposal, Review, Audit, Notification)" as WEB
-    component "GlobalExceptionHandler" as GEH
+    component "Controllers + DTO mappers\n(Auth, User, Project, Dashboard, Proposal, Review, Audit, Notification)\nGlobalExceptionHandler" as WEB
   }
   package "modules" {
-    component "auth\n(UserService, AuthService, JwtService)" as AUTH
-    component "project\n(ProjectService, ProjectStore,\nProjectAccessPolicy, ProjectHistoryService,\nDashboardService)" as PROJ
-    component "proposal\n(ProposalService,\nProposalVersionFactory)" as PROP
-    component "review\n(ReviewService,\nReviewDecisionHandler x3)" as REV
-    component "workflow\n(WorkflowService, ProjectState x6,\nProjectStateFactory)" as WF
-    component "audit\n(AuditEventListener,\nAuditRecorder, AuditQueryService)" as AUD
-    component "notification\n(NotificationListener,\nNotificationDispatcher, NotificationService)" as NOTIF
+    component "auth\n(UserService, AuthService, JwtService, EmailPolicy)" as AUTH
+    component "project\n(ProjectService, ProjectStore, ProjectAccessPolicy,\nProjectHistoryService, DashboardService)" as PROJ
+    component "proposal\n(ProposalService, ProposalVersionFactory, ProposalDiffService)" as PROP
+    component "review\n(ReviewService, ReviewDecisionHandler x3)" as REV
+    component "workflow\n(WorkflowService, ProjectState x6, ProjectStateFactory, AllowedActionsResolver)" as WF
+    component "audit\n(AuditEventListener, AuditRecorder, AuditQueryService)" as AUD
+    component "notification\n(NotificationListener, NotificationDispatcher, NotificationChannel x2, NotificationService)" as NOTIF
   }
   component "Spring Data JPA repositories" as REPO
   component "Flyway migrations" as FLY
@@ -27,7 +26,7 @@ node "prastav-backend (Spring Boot 3, Java 17)" {
 
 database "PostgreSQL 16\n(docker-compose)" as DB
 
-FE --> SEC : REST + Bearer JWT\n(/api, proxied by Vite)
+FE --> SEC : REST + Bearer JWT (/api, proxied by Vite)
 SEC --> WEB
 WEB --> AUTH
 WEB --> PROJ
@@ -37,22 +36,33 @@ WEB --> WF
 WEB --> AUD
 WEB --> NOTIF
 REV --> WF : decision strategies
-PROJ --> PROP
-PROP --> WF : ProjectStateFactory\n(allowed actions)
+REV --> PROJ : ProjectStore, ProjectAccessPolicy
+REV --> PROP : latest submitted version
+REV --> AUTH : UserService
+WF --> PROJ : ProjectStore
 WF --> PROP : open draft
-WF ..> AUD : domain events (Observer)
+WF --> AUTH : UserService
+PROP --> PROJ : ProjectStore, ProjectAccessPolicy
+PROP --> WF : ProjectStateFactory
+PROJ --> PROP : proposal versions
+PROJ --> WF : AllowedActionsResolver
+PROJ --> AUTH : UserService
+PROJ --> REV : timeline reviews
+PROJ --> AUD : timeline status changes
+NOTIF --> PROJ : ProjectStore
+NOTIF --> AUTH : UserService
+WF ..> AUD : events
 PROJ ..> AUD : events
 PROP ..> AUD : events
 REV ..> AUD : events
-WF ..> NOTIF : events (after commit)
-REV ..> NOTIF : events (after commit)
-NOTIF --> PROJ : ProjectStore
-NOTIF --> REPO
+WF ..> NOTIF : events, after commit
+REV ..> NOTIF : events, after commit
 AUTH --> REPO
 PROJ --> REPO
 PROP --> REPO
 REV --> REPO
 AUD --> REPO
+NOTIF --> REPO
 REPO --> DB
 FLY --> DB
 @enduml

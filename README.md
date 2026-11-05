@@ -159,7 +159,7 @@ Open http://localhost:5173 and sign in with a demo account. If port 5432 is take
 
 Swagger UI is at http://localhost:8080/swagger-ui.html (OpenAPI JSON at `/v3/api-docs`): sign in with `POST /api/auth/login`, click **Authorize** and paste the token.
 
-Base path `/api`; every endpoint except register, login and Swagger needs `Authorization: Bearer <jwt>`. Errors share one body: `{ timestamp, status, code, message, path, fieldErrors[] }`. The full contracts are in `docs/LLD.md` section 10.
+Base path `/api`; every endpoint except register, login and Swagger needs `Authorization: Bearer <jwt>`. Errors share one body: `{ timestamp, status, code, message, path, fieldErrors[] }`. The full contracts are in `docs/LLD.md` section 7.
 
 | Method | Path | Role | Purpose |
 | --- | --- | --- | --- |
@@ -208,7 +208,7 @@ frontend/
   src/config/           brand, navigation, demo accounts
   src/layouts/           AppShell (sidebar, top bar with notification bell), AuthLayout
   src/lib/               formatting, people helpers, audit entry text, list-parameter, debounce and notification hooks
-  src/pages/             landing, auth, role homes, project list, wizard, project page, assign, audit log
+  src/pages/             landing, auth, role homes, project list, wizard, project page, dashboard, assign, audit log, notifications
   src/router.tsx         routes and guards
   tailwind.config.js     design tokens
 ```
@@ -218,7 +218,7 @@ frontend/
 | Document | Contents |
 | --- | --- |
 | [`docs/PRD.md`](docs/PRD.md) | Requirements and technical specification |
-| [`docs/LLD.md`](docs/LLD.md) | Low level design: architecture, class catalogue, schema, API contracts, frontend architecture, tests |
+| [`docs/LLD.md`](docs/LLD.md) | Low level design: requirements, class design and frontend architecture, object-oriented design, SOLID, patterns, sequence and activity diagrams, API contracts, schema, error handling, validation, concurrency, tests, security and decisions |
 | [`docs/diagrams.md`](docs/diagrams.md), [`docs/uml/`](docs/uml) | Mermaid and PlantUML diagrams: use cases, domain, State pattern, status machine, five sequences, ER, architecture, events, notification channels, auth view and the workflow activity |
 | [`docs/design/README.md`](docs/design/README.md) | Mockups, design tokens and UI components |
 | [`docs/design/ASSETS.md`](docs/design/ASSETS.md) | Every image, its size and where it is used |
@@ -227,10 +227,12 @@ frontend/
 ## Tests
 
 ```bash
-cd backend && mvn test                     # JUnit 5 + Mockito unit tests and MockMvc slice tests; no database needed
+cd backend && mvn -q test                  # JUnit 5 + Mockito unit tests and MockMvc slice tests; no database needed
 cd frontend && npm run typecheck           # TypeScript type check
 cd frontend && npm run build               # type check and production build
 ```
+
+The backend has **321 tests** in 41 test classes. The frontend has no automated tests; `npm run build` type-checks it. Because the backend tests use no database, JPQL, Flyway migrations and the real `@Version` column run only in the application itself.
 
 Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService` (including reviewer reassignment: allowed, wrong state, wrong role, same reviewer, event published), `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `DashboardService` (coordinator summary from the grouped queries, other roles 403), `ProjectListQuery` (paging defaults and bounds), `ProjectSpecifications` (role scope and filters), the audit listener (including the reassignment entry), `PatternEmailPolicy` (with the shipped configuration), registration in `AuthService`, account creation in `UserService` and `NotificationService` (inbox scoping, paging bounds, unread count, read ownership), `NotificationListener` (who is notified for an assignment, a resubmission, a reassignment and each review decision, and that other status changes notify nobody), `NotificationDispatcher` (enabled channels in order, a failing channel does not stop the others, disabled channels skipped), `RetryingNotificationChannel` (no retry on success, success on a later attempt, gives up after max attempts) and the in-app and email channels. `UserControllerWebTest` checks the coordinator-only `POST /api/users`. `DashboardControllerWebTest` checks `GET /api/dashboard/summary`: 200 for the coordinator, 403 for student and faculty, 401 without a token. `NotificationControllerWebTest` checks that every role reaches only its own inbox, the paging parameters and envelope, and the 400, 401, 403 and 404 responses. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters, the page envelope, invalid list parameters, the summary endpoint and the coordinator-only reassignment.
 
@@ -238,7 +240,7 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 
 `NotificationFlowTest` runs the real workflow, listener, dispatcher, retry decorator and channels in a small Spring context with a real transaction lifecycle, and checks who is notified and that nothing is sent before commit or after a rollback. `ConcurrentSubmissionWebTest` races two submissions of one project through the real security chain, controller and `WorkflowService` against a version-checking store: one gets 200 and the other `409 CONCURRENT_UPDATE`. `GlobalExceptionHandlerTest` checks that mapping directly, and `ProjectAccessPolicyTest` that a reassignment moves access from the previous to the new reviewer.
 
-`ProjectSortTest` covers every list order and its id tie-break. `ProjectSpecificationsTest`, `ProposalDiffServiceTest` and `DashboardServiceTest` also cover each list filter alone and combined, that a reviewer filter cannot widen a role's scope, literal wildcards in search, version comparison with empty fields and missing versions, and a dashboard with no projects. The tests run without a database, so the JPQL of the grouped dashboard queries runs only against PostgreSQL in the running application.
+`ProjectSortTest` covers every list order and its id tie-break. `ProjectSpecificationsTest`, `ProposalDiffServiceTest` and `DashboardServiceTest` also cover each list filter alone and combined, that a reviewer filter cannot widen a role's scope, literal wildcards in search, version comparison with empty fields and missing versions, and a dashboard with no projects.
 
 `NotificationFlowTest` also covers delivery failures: a failed inbox insert is retried and stored, and when every attempt fails nothing is stored, the failure is logged, and the workflow change, its audit entry and other recipients are unaffected. `GlobalExceptionHandlerTest`, `ProposalControllerWebTest`, `UserControllerWebTest` and `AuthControllerWebTest` check that losing a race to a unique index gives a clean answer with no SQL or constraint name: 409 `CONCURRENT_UPDATE` for a proposal version, and the same 400 as the duplicate-email check for an email.
 

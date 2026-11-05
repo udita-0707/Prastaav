@@ -52,7 +52,7 @@ State classes, entities and `Guards` are plain Java, so tests build real objects
 | `backend/src/test/java/com/prastav/support/TestData.java` | add `new OnHoldState()` to `stateFactory()` (otherwise the factory fails fast, by design) |
 | `backend/src/test/java/com/prastav/workflow/OnHoldStateTest.java` (new) | resume legal for coordinator; everything else illegal; UnderReviewState hold tests |
 | `frontend/src/api/types.ts`, `components/labels.ts`, `components/StatusBadge` CSS in `styles.css`, `components/WorkflowRail.tsx`, `pages/ProjectDetailPage.tsx` | new status and action, badge colour, buttons |
-| `docs/uml/04_project_state.puml`, `docs/diagrams.md`, `docs/LLD.md` section 5 | diagram and table |
+| `docs/uml/04_project_state.puml`, `docs/diagrams.md`, `docs/LLD.md` section 2.3 | diagram and table |
 
 Nothing in `AuditEventListener` changes: HOLD and RESUME fall into STATUS_CHANGED.
 
@@ -104,7 +104,7 @@ Version 1 is the original submission, so versions 2, 3 and 4 are the three resub
 
 ### B5. Delivering notifications through channels
 
-How it works today (LLD section 6.1):
+How it works today (LLD section 2.4.1):
 
 1. `notification/NotificationListener.java` is a `@TransactionalEventListener` (after commit, with no transaction of its own) on `ProjectStatusChangedEvent` and `ReviewRecordedEvent`: ASSIGN_REVIEWER notifies the reviewer, a SUBMIT out of REVISION_REQUESTED notifies the reviewer, every review decision notifies the student owner.
 2. It calls `NotificationDispatcher.dispatch`, which runs every channel named in `prastav.notification.enabled-channels`, each wrapped in `RetryingNotificationChannel`.

@@ -157,7 +157,7 @@ com.prastav
 
 **notifications** — id, recipient\_id (FK users), project\_id (nullable FK projects), type (REVIEWER\_ASSIGNED/REVIEWER\_UNASSIGNED/REVIEW\_DECISION/RESUBMITTED), message, is\_read, created\_at; indexes (recipient\_id, is\_read) and (recipient\_id, created\_at)
 
-Relationships: User 1—\* Project (owner); User 1—\* Project (reviewer); Project 1—\* ProposalVersion; ProposalVersion 1—\* Review; Project 1—\* AuditLog; User 1—\* Notification (recipient); Project 0..1—\* Notification.
+Relationships: User 1—\* Project (owner); User 0..1—\* Project (reviewer); Project 1—1..\* ProposalVersion; User 1—\* ProposalVersion (created by); ProposalVersion 1—\* Review; Project 1—\* Review; User 1—\* Review (reviewer); Project 0..1—\* AuditLog; User 1—\* AuditLog (actor); User 1—\* Notification (recipient); Project 0..1—\* Notification.
 
 Use Flyway migrations (`V1__init.sql`, …) so schema is reproducible.
 

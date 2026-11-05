@@ -1,120 +1,89 @@
 @startuml 10_er
 !include _style.iuml
-title Prastav - ER diagram (Flyway migrations)
+title Prastav - ER diagram (Flyway migrations V1 to V6)
 hide circle
-skinparam linetype ortho
 
 entity users {
-  * id : UUID <<PK>>
-  --
-  * name : VARCHAR(120)
-  * email : VARCHAR(255) <<UNIQUE>>
-  * password_hash : VARCHAR(100)
-  * role : VARCHAR(20) <<CHECK>>
-  admission_year : INTEGER
-  branch : VARCHAR(20)
-  * created_at : TIMESTAMPTZ
-  --
-  idx_users_admission_year_branch (admission_year, branch)
+  {field} * id : UUID <<PK>> - users_pkey
+  {field} * name : VARCHAR(120)
+  {field} * email : VARCHAR(255) <<UK>> - users_email_key
+  {field} * password_hash : VARCHAR(100)
+  {field} * role : VARCHAR(20) - users_role_check: STUDENT, FACULTY, COORDINATOR
+  {field} * created_at : TIMESTAMPTZ
+  {field} admission_year : INTEGER - nullable, idx_users_admission_year_branch with branch
+  {field} branch : VARCHAR(20) - nullable
 }
 
 entity projects {
-  * id : UUID <<PK>>
-  --
-  * title : VARCHAR(200)
-  * description : TEXT
-  tech_stack : VARCHAR(500)
-  team_members : TEXT
-  * owner_id : UUID <<FK users>>
-  reviewer_id : UUID <<FK users>>
-  * status : VARCHAR(30) <<CHECK>>
-  * version : BIGINT (optimistic lock)
-  * created_at : TIMESTAMPTZ
-  * updated_at : TIMESTAMPTZ
-  --
-  idx_projects_owner (owner_id)
-  idx_projects_reviewer (reviewer_id)
-  idx_projects_status (status)
-  idx_projects_updated_at (updated_at)
+  {field} * id : UUID <<PK>> - projects_pkey
+  {field} * title : VARCHAR(200)
+  {field} * description : TEXT
+  {field} tech_stack : VARCHAR(500) - nullable
+  {field} team_members : TEXT - nullable
+  {field} * owner_id : UUID <<FK>> - projects_owner_id_fkey, idx_projects_owner
+  {field} reviewer_id : UUID <<FK>> - nullable, projects_reviewer_id_fkey, idx_projects_reviewer
+  {field} * status : VARCHAR(30) - projects_status_check: DRAFT, SUBMITTED, UNDER_REVIEW, REVISION_REQUESTED, APPROVED, REJECTED; idx_projects_status
+  {field} * version : BIGINT - DEFAULT 0, optimistic lock
+  {field} * created_at : TIMESTAMPTZ
+  {field} * updated_at : TIMESTAMPTZ - idx_projects_updated_at
 }
 
 entity proposal_versions {
-  * id : UUID <<PK>>
-  --
-  * project_id : UUID <<FK projects>>
-  * version_number : INTEGER
-  problem_statement : TEXT
-  objectives : TEXT
-  methodology : TEXT
-  expected_outcome : TEXT
-  timeline : TEXT
-  reference_link : VARCHAR(500)
-  * state : VARCHAR(20) <<CHECK>>
-  submitted_at : TIMESTAMPTZ
-  * created_by : UUID <<FK users>>
-  * created_at : TIMESTAMPTZ
-  ..
-  uq_proposal_project_version UNIQUE (project_id, version_number)
-  ux_proposal_one_open_draft UNIQUE (project_id) WHERE state = 'DRAFT'
-  trigger: no UPDATE/DELETE when SUBMITTED
+  {field} * id : UUID <<PK>> - proposal_versions_pkey
+  {field} * project_id : UUID <<FK>> - proposal_versions_project_id_fkey; uq_proposal_project_version with version_number; ux_proposal_one_open_draft WHERE state = 'DRAFT'
+  {field} * version_number : INTEGER - proposal_versions_version_number_check: at least 1
+  {field} problem_statement : TEXT - nullable
+  {field} objectives : TEXT - nullable
+  {field} methodology : TEXT - nullable
+  {field} expected_outcome : TEXT - nullable
+  {field} timeline : TEXT - nullable
+  {field} reference_link : VARCHAR(500) - nullable
+  {field} * state : VARCHAR(20) - proposal_versions_state_check: DRAFT, SUBMITTED; trg_proposal_versions_immutable blocks UPDATE and DELETE when SUBMITTED
+  {field} submitted_at : TIMESTAMPTZ - nullable, ck_proposal_submitted_at: set exactly when SUBMITTED
+  {field} * created_by : UUID <<FK>> - proposal_versions_created_by_fkey
+  {field} * created_at : TIMESTAMPTZ
 }
 
 entity reviews {
-  * id : UUID <<PK>>
-  --
-  * project_id : UUID <<FK projects>>
-  * proposal_version_id : UUID <<FK proposal_versions>>
-  * reviewer_id : UUID <<FK users>>
-  * decision : VARCHAR(30) <<CHECK>>
-  comments : TEXT
-  * created_at : TIMESTAMPTZ
-  ..
-  CHECK comments required unless APPROVE
-  --
-  idx_reviews_project (project_id)
+  {field} * id : UUID <<PK>> - reviews_pkey
+  {field} * project_id : UUID <<FK>> - reviews_project_id_fkey, idx_reviews_project
+  {field} * proposal_version_id : UUID <<FK>> - reviews_proposal_version_id_fkey
+  {field} * reviewer_id : UUID <<FK>> - reviews_reviewer_id_fkey
+  {field} * decision : VARCHAR(30) - reviews_decision_check: APPROVE, REQUEST_REVISION, REJECT
+  {field} comments : TEXT - nullable, ck_review_comments: required unless APPROVE
+  {field} * created_at : TIMESTAMPTZ
 }
 
 entity audit_logs {
-  * id : UUID <<PK>>
-  --
-  project_id : UUID <<FK projects>>
-  * actor_id : UUID <<FK users>>
-  * action : VARCHAR(40)
-  from_status : VARCHAR(30)
-  to_status : VARCHAR(30)
-  details : TEXT (JSON)
-  * created_at : TIMESTAMPTZ
-  ..
-  trigger: append-only
-  --
-  idx_audit_logs_project (project_id, created_at)
-  idx_audit_logs_actor (actor_id, created_at)
-  idx_audit_logs_action (action, created_at)
-  idx_audit_logs_created_at (created_at)
+  {field} * id : UUID <<PK>> - audit_logs_pkey; trg_audit_logs_append_only blocks UPDATE and DELETE
+  {field} project_id : UUID <<FK>> - nullable, audit_logs_project_id_fkey; idx_audit_logs_project with created_at
+  {field} * actor_id : UUID <<FK>> - audit_logs_actor_id_fkey; idx_audit_logs_actor with created_at
+  {field} * action : VARCHAR(40) - idx_audit_logs_action with created_at
+  {field} from_status : VARCHAR(30) - nullable
+  {field} to_status : VARCHAR(30) - nullable
+  {field} details : TEXT - nullable, JSON text
+  {field} * created_at : TIMESTAMPTZ - idx_audit_logs_created_at
 }
 
 entity notifications {
-  * id : UUID <<PK>>
-  --
-  * recipient_id : UUID <<FK users>>
-  project_id : UUID <<FK projects>>
-  * type : VARCHAR(30) <<CHECK>>
-  * message : VARCHAR(500)
-  * is_read : BOOLEAN
-  * created_at : TIMESTAMPTZ
-  --
-  idx_notifications_recipient_read (recipient_id, is_read)
-  idx_notifications_recipient_created (recipient_id, created_at)
+  {field} * id : UUID <<PK>> - notifications_pkey
+  {field} * recipient_id : UUID <<FK>> - notifications_recipient_id_fkey; idx_notifications_recipient_read with is_read; idx_notifications_recipient_created with created_at
+  {field} project_id : UUID <<FK>> - nullable, notifications_project_id_fkey
+  {field} * type : VARCHAR(30) - notifications_type_check: REVIEWER_ASSIGNED, REVIEWER_UNASSIGNED, REVIEW_DECISION, RESUBMITTED
+  {field} * message : VARCHAR(500)
+  {field} * is_read : BOOLEAN - DEFAULT false
+  {field} * created_at : TIMESTAMPTZ
 }
 
-users ||--o{ projects : owns
-users |o--o{ projects : reviews
-projects ||--|{ proposal_versions : has
-proposal_versions ||--o{ reviews : reviewed in
-projects ||--o{ reviews : has
-users ||--o{ reviews : writes
-projects |o--o{ audit_logs : logged in
-users ||--o{ audit_logs : acts in
-users ||--o{ notifications : receives
-projects |o--o{ notifications : about
+users ||--o{ projects : owner_id
+users |o--o{ projects : reviewer_id
+projects ||--|{ proposal_versions : project_id
+users ||--o{ proposal_versions : created_by
+projects ||--o{ reviews : project_id
+proposal_versions ||--o{ reviews : proposal_version_id
+users ||--o{ reviews : reviewer_id
+projects |o--o{ audit_logs : project_id
+users ||--o{ audit_logs : actor_id
+users ||--o{ notifications : recipient_id
+projects |o--o{ notifications : project_id
 @enduml
