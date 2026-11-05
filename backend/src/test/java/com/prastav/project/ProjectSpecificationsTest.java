@@ -150,4 +150,85 @@ class ProjectSpecificationsTest {
         verify(cb, never()).equal(eq(reviewerId), any(Object.class));
         verify(cb, never()).like(any(), anyString());
     }
+
+    @Test
+    void statusFilterConstrainsTheStatusColumn() {
+        Set<ProjectStatus> statuses = Set.of(ProjectStatus.APPROVED);
+        Predicate inStatus = mock(Predicate.class);
+        when(status.in(statuses)).thenReturn(inStatus);
+
+        assertSame(inStatus, ProjectSpecifications.statusIn(statuses).toPredicate(root, criteriaQuery, cb));
+    }
+
+    @Test
+    void reviewerFilterConstrainsTheReviewer() {
+        UUID id = UUID.randomUUID();
+        Predicate byReviewer = mock(Predicate.class);
+        when(cb.equal(reviewerId, id)).thenReturn(byReviewer);
+
+        assertSame(byReviewer, ProjectSpecifications.reviewedBy(id).toPredicate(root, criteriaQuery, cb));
+    }
+
+    @Test
+    void ownerCohortWithOnlyABranchLeavesTheYearOpen() {
+        Path<Object> owner = (Path<Object>) root.get("owner");
+        Path<Object> branch = mock(Path.class);
+        when(owner.get("branch")).thenReturn(branch);
+        Predicate inBranch = mock(Predicate.class);
+        when(cb.equal(branch, "CSAI")).thenReturn(inBranch);
+
+        ProjectSpecifications.ownerCohort(null, "CSAI").toPredicate(root, criteriaQuery, cb);
+
+        verify(cb).and(everything, inBranch);
+        verify(owner, never()).get("admissionYear");
+    }
+
+    @Test
+    void searchTextIsLowerCasedAndItsWildcardsAreMatchedLiterally() {
+        when(root.<Project, User>join("owner", JoinType.INNER)).thenReturn(mock(Join.class));
+        when(root.<Project, User>join("reviewer", JoinType.LEFT)).thenReturn(mock(Join.class));
+        when(cb.lower(any())).thenReturn(mock(Expression.class));
+
+        ProjectSpecifications.matches("50%_OFF").toPredicate(root, criteriaQuery, cb);
+
+        verify(cb, times(5)).like(any(), eq("%50\\%\\_off%"), eq('\\'));
+    }
+
+    @Test
+    void aReviewerFilterCannotWidenTheRoleScope() {
+        when(cb.and(any(Predicate.class), any(Predicate.class))).thenReturn(mock(Predicate.class));
+        UUID someoneElse = UUID.randomUUID();
+        ProjectListQuery query = ProjectListQuery.of(null, null, someoneElse, null, null, null, null, null);
+        Actor faculty = actor(Role.FACULTY);
+        Actor student = actor(Role.STUDENT);
+
+        ProjectSpecifications.forQuery(faculty, query).toPredicate(root, criteriaQuery, cb);
+        ProjectSpecifications.forQuery(student, query).toPredicate(root, criteriaQuery, cb);
+
+        verify(cb).equal(reviewerId, faculty.userId());
+        verify(cb).equal(ownerId, student.userId());
+        verify(cb, times(2)).equal(reviewerId, someoneElse);
+        verify(cb, never()).or(any(Predicate[].class));
+    }
+
+    @Test
+    void coordinatorQueryAppliesEveryFilterWithoutARoleScope() {
+        when(cb.and(any(Predicate.class), any(Predicate.class))).thenReturn(mock(Predicate.class));
+        Path<Object> owner = (Path<Object>) root.get("owner");
+        Path<Object> admissionYear = mock(Path.class);
+        Path<Object> branch = mock(Path.class);
+        when(owner.get("admissionYear")).thenReturn(admissionYear);
+        when(owner.get("branch")).thenReturn(branch);
+        UUID reviewer = UUID.randomUUID();
+        Set<ProjectStatus> statuses = Set.of(ProjectStatus.UNDER_REVIEW);
+        ProjectListQuery query = ProjectListQuery.of(statuses, null, reviewer, 2023, " csai ", null, null, null);
+
+        ProjectSpecifications.forQuery(actor(Role.COORDINATOR), query).toPredicate(root, criteriaQuery, cb);
+
+        verify(status).in(statuses);
+        verify(cb).equal(reviewerId, reviewer);
+        verify(cb).equal(admissionYear, 2023);
+        verify(cb).equal(branch, "CSAI");
+        verify(cb, never()).equal(eq(ownerId), any(Object.class));
+    }
 }

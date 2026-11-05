@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -130,5 +131,18 @@ class ProposalControllerWebTest {
         mockMvc.perform(get("/api/projects/{id}/proposals/compare", projectId).param("from", "1").param("to", "2"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    void anEmptyFieldIsReturnedAsNullRatherThanLeftOut() throws Exception {
+        when(proposalDiffService.compare(eq(projectId), eq(1), eq(2), any(Actor.class))).thenReturn(new ProposalDiff(1, 2,
+                List.of(new FieldDiff("referenceLink", null, "https://example.org/ref", true))));
+
+        mockMvc.perform(get("/api/projects/{id}/proposals/compare", projectId)
+                        .param("from", "1").param("to", "2")
+                        .header("Authorization", bearer(Role.STUDENT)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.fields[0].fromValue").value(nullValue()))
+                .andExpect(jsonPath("$.fields[0].toValue").value("https://example.org/ref"));
     }
 }
