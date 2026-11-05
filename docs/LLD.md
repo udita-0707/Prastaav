@@ -5,16 +5,18 @@
 | | |
 |---|---|
 | Document | Low Level Design for the whole system |
-| Date | 25 October 2026 |
+| Date | 6 November 2026 |
 | Repository | `prastav` (artifacts `prastav-backend`, `prastav-frontend`) |
 | Base package | `com.prastav` |
 | Stack | Java 17, Spring Boot 3.3, Spring Security (JWT), Spring Data JPA, Flyway, PostgreSQL 16; React 18 + TypeScript, Vite, React Router, TanStack Query, Axios, Tailwind CSS |
 
 ## 0. How to read this document
 
-This document describes the code as it is. Every class, table, endpoint and diagram element named here exists in the repository with exactly that name. Names in this document, in `docs/diagrams.md` (Mermaid) and in `docs/uml/*.puml` (PlantUML) match the code exactly. The class catalogue in section 8 is generated from the Java sources, so field names, types and method signatures are copied rather than retyped.
+This document describes the code as it is. Every class, table, endpoint and diagram element named here exists in the repository with exactly that name. Names in this document, in `docs/diagrams.md` (Mermaid) and in `docs/uml/*.puml` (PlantUML) match the code exactly. The class catalogue in section 2.6 is generated from the Java sources, so field names, types and method signatures are copied rather than retyped.
 
-## 1. Scope
+The document runs in this order: requirements (1), class design (2), object-oriented design (3), SOLID (4), design patterns (5), sequence and activity diagrams (6), API contracts (7), database schema (8), error handling (9), validation (10), concurrency (11), tests (12), then security (13) and design decisions and known limitations (14).
+
+## 1. Requirements
 
 ### 1.1 Problem
 
@@ -28,17 +30,44 @@ One system for the full proposal lifecycle with an enforced workflow: only valid
 
 AI proposal analysis, ML risk prediction, GitHub integration, an external event bus, microservices, cloud deployment, real email delivery, and file uploads (proposals are structured text fields plus an optional link).
 
-### 1.4 Roles
+### 1.4 Actors
 
-| Role | Can do |
+| Actor | Can do |
 |---|---|
-| STUDENT | Register with an institutional student email, create a project, edit own draft, submit and resubmit, start a revision, view own projects, versions, feedback and history |
-| FACULTY | View assigned projects, review the latest submitted version: approve, request revision or reject (comments mandatory for the last two) |
-| COORDINATOR | View all projects and counts by status, assign a faculty reviewer, create faculty and coordinator accounts |
+| STUDENT | Register with an institutional student email, create a project, edit own draft, submit and resubmit, start a revision, compare versions, view own projects, feedback and timeline, read own notifications |
+| FACULTY | View assigned projects, compare versions, read reviews and the timeline, review the latest submitted version: approve, request revision or reject (comments mandatory for the last two), read own notifications |
+| COORDINATOR | View all projects and counts by status, read the coordinator dashboard, assign and reassign a faculty reviewer, compare versions, read reviews and the timeline, query the audit log, create faculty and coordinator accounts, read own notifications |
 
-## 2. Requirements traceability
+Each account has exactly one role, fixed on the account and carried in the JWT. No external system acts on Prastav.
 
-### 2.1 Functional requirements
+### 1.5 Use cases
+
+| Use case | Student | Faculty | Coordinator | Requirement |
+|---|---|---|---|---|
+| Register with an institutional student email | yes | | | FR-1, FR-18 |
+| Log in (JWT) | yes | yes | yes | FR-1 |
+| Create project with draft v1 | yes | | | FR-2 |
+| Edit own draft | yes | | | FR-3 |
+| Submit / resubmit proposal | yes | | | FR-4, FR-8 |
+| Create revision vN+1 | yes | | | FR-7 |
+| View feedback and reviews | yes | yes | yes | FR-7 |
+| View project timeline | yes | yes | yes | FR-11 |
+| Compare two proposal versions | yes | yes | yes | FR-14 |
+| Assign or reassign faculty reviewer | | | yes | FR-5, FR-17 |
+| Review latest submitted version (approve / request revision / reject) | | yes | | FR-6 |
+| View all projects | | | yes | FR-12 |
+| Filter, search and page project lists | yes | yes | yes | FR-12 |
+| View dashboard counts by status | yes | yes | yes | FR-15 |
+| Create faculty or coordinator account | | | yes | FR-18 |
+| Read and mark own notifications | yes | yes | yes | FR-13 |
+| View coordinator dashboard (awaiting assignment, reviewer workload) | | | yes | FR-15 |
+| Query audit log (project, actor, action, date range) | | | yes | FR-16 |
+
+A student or faculty member reaches only their own or assigned projects; the coordinator reaches every project.
+
+![Use cases](uml/png/01_use_case.png)
+
+### 1.6 Functional requirements
 
 | ID | Requirement | Where |
 |---|---|---|
@@ -55,13 +84,38 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-11 | Project timeline | `ProjectHistoryService`, `GET /api/projects/{id}/history`, Timeline tab of the project page |
 | FR-12 | Role-scoped lists with status filter, search, coordinator batch filter, pagination | `ProjectService.listProjects`, `ProjectListQuery`, `ProjectSpecifications`, `GET /api/projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size=` |
 | FR-13 | Notifications on reviewer assignment (to the faculty member), review decision (to the student owner) and resubmission (to the faculty member), stored per recipient with a read flag; paged inbox with unread filter, unread count, mark one or all read, each scoped to the caller; delivery through the configured channels (in-app, email log); bell with unread count polled every 30 seconds, latest-items dropdown and full notifications page | `NotificationListener`, `NotificationDispatcher`, `NotificationChannel`, `Notification`, `NotificationRepository`, `NotificationService`, `NotificationController`, `NotificationMapper`, `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/{id}/read`, `PATCH /api/notifications/read-all`, `V4__notifications.sql`, `NotificationBell`, `NotificationItem`, `NotificationsPage` |
-| FR-17 | Coordinator reassigns the reviewer of an UNDER_REVIEW project (status unchanged); the new reviewer must be FACULTY and differ from the current one; any other status is ILLEGAL_TRANSITION; audited and both reviewers notified | `PUT /api/projects/{id}/assign`, `WorkflowService.reassignReviewer`, `UnderReviewState.reassignReviewer`, `ReviewerReassignedEvent`, `AuditEventListener` (`REVIEWER_REASSIGNED`), `NotificationListener`, `V5__notification_reviewer_unassigned.sql` |
 | FR-14 | Compare two proposal versions field by field | `ProposalDiffService`, `ProposalDiff`, `FieldDiff`, `ProposalVersionRepository.findByProject_IdAndVersionNumber`, `GET /api/projects/{id}/proposals/compare?from=&to=`, Compare tab of the project page (`VersionCompare`) |
 | FR-15 | Role dashboards: counts per status and projects awaiting assignment; coordinator dashboard with counts by status, the list of submitted projects without a reviewer and the open reviews of every faculty member, computed by grouped queries | `ProjectService.countProjects`, `GET /api/projects/summary`, `DashboardService`, `ProjectRepository.findAwaitingAssignment`, `ProjectRepository.reviewerWorkload`, `DashboardController`, `GET /api/dashboard/summary`, web app home pages, `DashboardPage` |
 | FR-16 | Coordinator audit log: paged, newest first, filterable by project, actor, action and date range | `AuditQueryService.search`, `AuditQuery`, `AuditSpecifications`, `AuditController`, `GET /api/audit`, `V6__audit_query_indexes.sql` |
+| FR-17 | Coordinator reassigns the reviewer of an UNDER_REVIEW project (status unchanged); the new reviewer must be FACULTY and differ from the current one; any other status is ILLEGAL_TRANSITION; audited and both reviewers notified | `PUT /api/projects/{id}/assign`, `WorkflowService.reassignReviewer`, `UnderReviewState.reassignReviewer`, `ReviewerReassignedEvent`, `AuditEventListener` (`REVIEWER_REASSIGNED`), `NotificationListener`, `V5__notification_reviewer_unassigned.sql` |
 | FR-18 | Institution profile and email policy: institutional domain for every account; student-only registration with `<firstname>.<YY><branch>@domain`, storing admission year and branch; staff accounts created by the coordinator | `InstitutionProperties`, `EmailPolicy`, `PatternEmailPolicy`, `AuthService.register`, `UserService.createAccount`, `POST /api/users`, `V3__user_institution_profile.sql` |
 
-### 2.2 Engineering items
+
+### 1.7 Institution profile and email policy (FR-18)
+
+The institution is configuration, not code. `InstitutionProperties` binds `prastav.institution` from `application.yml`: `name`, `email-domain` and `student-email-pattern`. `PatternEmailPolicy`, the implementation of the `EmailPolicy` Strategy, applies it to every new account:
+
+- Every account's email must be on `email-domain`. Emails are compared case-insensitively and stored lower-case.
+- `POST /api/auth/register` creates students only. The local part must also match `student-email-pattern`, whose named groups give the admission year (2000 + `year`) and the upper-case `branch`. `aarav.23csai@nst.rishihood.edu.in` is admission year 2023, branch CSAI; both are stored on `User`.
+- Faculty and coordinator accounts need only the domain. The coordinator creates them through `POST /api/users`, and `DemoDataSeeder` creates the demo accounts.
+- The coordinator can filter the project list by the owner's admission year and branch (FR-12).
+
+### 1.8 Non-functional requirements
+
+| Quality | Requirement | How it is met |
+|---|---|---|
+| Security | Passwords are never stored or returned in clear; every endpoint checks role and ownership | BCrypt, HS256 JWT with a 60-minute expiry, `@PreAuthorize`, `ProjectAccessPolicy`, `Guards` (section 13) |
+| Data integrity | A submitted version never changes; two simultaneous transitions cannot both succeed; the rules hold under direct SQL | Database constraints and triggers (section 8), `@Version` on `Project` (section 11) |
+| Auditability | Every important action is recorded, with who, what and when, and cannot be altered | `AuditEventListener` in the publisher's transaction, append-only trigger on `audit_logs` |
+| Reliability | A notification problem never undoes a business change | After-commit delivery, one transaction per attempt, `RetryingNotificationChannel` (section 2.4.1) |
+| Performance | Lists stay bounded and do not load data into memory to count it | Paging in the database (size at most 50, or 100 for the audit log), grouped queries for dashboards, indexes on every filtered column (section 8.7) |
+| Maintainability | Modules stay small and side effects are decoupled | Modular monolith, constructor injection, no business logic in controllers, the patterns in section 5 |
+| Testability | Domain rules are tested without Spring or a database | State classes and entities are plain Java; the suite runs with no database (section 12) |
+| Configurability | Institution, channels, retries and secrets change without code | `application.yml` with environment variables and safe development defaults |
+| Usability | Every view handles loading, empty and error; the app is keyboard operable and works from 1440px down to 360px | Section 2.7.5 |
+| Documentation | Every endpoint is explorable | Swagger UI at `/swagger-ui.html`, section 7 and the diagrams in section 6 |
+
+### 1.9 Engineering items
 
 | Item | Evidence |
 |---|---|
@@ -70,18 +124,20 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment, coordinator dashboard, audit query, notification flow, concurrent updates | 321 tests in `backend/src/test/java` (see section 16) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment, coordinator dashboard, audit query, notification flow, concurrent updates | 321 tests in `backend/src/test/java` (see section 12) |
 | MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, coordinator dashboard, account creation, notification inbox, audit log) | `ProjectControllerWebTest` (23 tests), `DashboardControllerWebTest` (6 tests), `ProposalControllerWebTest` (8 tests), `UserControllerWebTest` (5 tests), `AuthControllerWebTest` (2 tests), `NotificationControllerWebTest` (12 tests), `AuditControllerWebTest` (20 tests), `ConcurrentSubmissionWebTest` (4 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
 
-## 3. Architecture
+## 2. Class design
+
+### 2.1 Architecture
 
 Prastav is a **modular monolith**: one Spring Boot deployable and one PostgreSQL database. Each module owns its entities and repository; other modules reach it only through its public service classes (`UserService`, `ProjectStore`, `ProposalService`, `ReviewService`, `AuditQueryService`, `WorkflowService`) or by listening to its domain events.
 
 ![Component architecture](uml/png/11_component_architecture.png)
 
-### 3.1 Layers inside a module
+#### 2.1.1 Layers inside a module
 
 | Layer | Contains | Rule |
 |---|---|---|
@@ -90,30 +146,30 @@ Prastav is a **modular monolith**: one Spring Boot deployable and one PostgreSQL
 | domain | entities, enums, value records, state classes, `Guards`, events | Business rules. State classes and entities are plain Java and tested without Spring. |
 | repository | `*Repository extends JpaRepository` | Persistence only; used inside its own module. |
 
-### 3.2 Module dependencies (no cycles between beans)
+#### 2.1.2 Module dependencies (no cycles between beans)
 
 ```
 auth      <- (everyone needs Actor/User)        common <- everyone
 workflow  -> project (ProjectStore), proposal (ProposalService), auth (UserService)
 proposal  -> project (ProjectStore, ProjectAccessPolicy), workflow (ProjectStateFactory)
 review    -> workflow (WorkflowService via handlers), proposal, project, auth
-project   -> proposal (ProposalService), workflow (AllowedActionsResolver), auth, audit (history read)
+project   -> proposal (ProposalService), workflow (AllowedActionsResolver), auth, audit and review (history read)
 audit     -> auth (Actor); listens to events from project, proposal, workflow, review
 notification -> project (ProjectStore), auth; listens to events from workflow, review
 ```
 
 `ProjectStore` exists so that `ProposalService` and `WorkflowService` can load and save projects without depending on `ProjectService`, which itself depends on `ProposalService`; this keeps constructor injection free of cycles.
 
-### 3.3 Request lifecycle
+#### 2.1.3 Request lifecycle
 
 1. `JwtAuthenticationFilter` verifies the Bearer token and puts an `Actor(userId, role)` in the security context.
 2. `@PreAuthorize` on the controller method checks the role (authorization layer 1).
 3. The controller calls a service with the `Actor` as an explicit parameter.
 4. The service loads data, checks ownership/assignment via `ProjectAccessPolicy` or the state guards (layer 2), changes state, saves, publishes events.
-5. `AuditEventListener` runs synchronously in the same transaction (audit rows commit or roll back with the change). `NotificationListener` runs after that transaction commits, in a new transaction of its own (section 6.1).
+5. `AuditEventListener` runs synchronously in the same transaction (audit rows commit or roll back with the change). `NotificationListener` runs after that transaction commits, in a new transaction of its own (section 2.4.1).
 6. The controller maps the result to a response record. Any exception becomes an `ApiError` in `GlobalExceptionHandler` or `RestAuthErrorHandler`.
 
-## 4. Package structure
+### 2.2 Package structure
 
 ```
 com.prastav
@@ -160,9 +216,9 @@ com.prastav
                UnreadCountResponse, MarkAllReadResponse, NotificationMapper
 ```
 
-## 5. Workflow engine
+### 2.3 Workflow engine
 
-### 5.1 Status table (the only legal transitions)
+#### 2.3.1 Status table (the only legal transitions)
 
 | From | Action | Actor | To | Guard (implemented in) |
 |---|---|---|---|---|
@@ -178,7 +234,7 @@ APPROVED and REJECTED are terminal. Any pair not in this table throws `IllegalTr
 
 ![Project state machine](uml/png/04_project_state.png)
 
-### 5.2 State pattern classes
+#### 2.3.2 State pattern classes
 
 ![Workflow State pattern](uml/png/03_workflow_state_pattern.png)
 
@@ -199,14 +255,14 @@ States are stateless Spring `@Component`s. `ProjectStateFactory` receives `List<
 
 `Guards` holds the static precondition checks used by the states (`requireOwner`, `requireRole`, `requireAssignedReviewer`, `requireComments`, `requireOpenDraft`, `requireComplete`). Keeping them static and dependency-free lets tests construct states with `new DraftState()`.
 
-### 5.3 `WorkflowService` algorithm (Facade)
+#### 2.3.3 `WorkflowService` algorithm (Facade)
 
 Every public method (`submit`, `assignReviewer`, `approve`, `requestRevision`, `reject`) is `@Transactional` and follows the same private template `transition(project, actor, action, step, details)`:
 
 1. Load the project through `ProjectStore.getById` (404 if missing). For `submit`, also load the open draft through `ProposalService.findOpenDraft`; for `assignReviewer`, load the faculty user through `UserService.getById`.
 2. Remember `from = project.getStatus()`.
 3. `stateFactory.stateOf(from)` and call the action on it. The state runs its guards, then mutates the project (`moveTo`, `assignReviewer`) and, for submit, freezes the draft (`ProposalVersion.submit()`).
-4. `projectStore.save(project)`. When the transaction commits, the `@Version` column makes a concurrent second transition fail with `OptimisticLockingFailureException`, mapped to 409 `CONCURRENT_UPDATE` (section 11.4).
+4. `projectStore.save(project)`. When the transaction commits, the `@Version` column makes a concurrent second transition fail with `OptimisticLockingFailureException`, mapped to 409 `CONCURRENT_UPDATE` (section 11).
 5. Publish `ProjectStatusChangedEvent(projectId, actorId, action, from, to, details)`.
 
 If step 3 throws, steps 4 and 5 never run and the transaction rolls back, so an illegal action leaves no trace except the error response.
@@ -218,7 +274,7 @@ If step 3 throws, steps 4 and 5 never run and the transaction rolls back, so an 
 3. `projectStore.save(project)` (optimistic lock as above).
 4. Publish `ReviewerReassignedEvent(projectId, actorId, previousReviewerId, newReviewerId)`. It is not a `ProjectStatusChangedEvent`, since from and to would be the same status.
 
-### 5.4 `allowedActions`
+#### 2.3.4 `allowedActions`
 
 `AllowedActionsResolver.resolve(project, actor, hasOpenDraft)` starts from `stateOf(status).availableActions()` and keeps an action only if this actor may perform it:
 
@@ -233,9 +289,9 @@ The UI renders buttons only from this list. The backend still re-checks every ac
 
 `ProposalService` uses the same `availableActions()` to decide whether EDIT_DRAFT or CREATE_REVISION is legal in the current status, so proposal rules and workflow rules cannot drift apart.
 
-## 6. Events and listeners (Observer)
+### 2.4 Events and listeners (Observer)
 
-Publishers use Spring's `ApplicationEventPublisher`. `AuditEventListener` uses `@EventListener` and runs **synchronously in the publisher's transaction**: an audit row is committed if and only if the change it describes is committed. `NotificationListener` uses `@TransactionalEventListener` and runs after that transaction commits (section 6.1).
+Publishers use Spring's `ApplicationEventPublisher`. `AuditEventListener` uses `@EventListener` and runs **synchronously in the publisher's transaction**: an audit row is committed if and only if the change it describes is committed. `NotificationListener` uses `@TransactionalEventListener` and runs after that transaction commits (section 2.4.1).
 
 | Event (record) | Published by | Payload | `AuditEventListener` writes |
 |---|---|---|---|
@@ -248,7 +304,7 @@ Publishers use Spring's `ApplicationEventPublisher`. `AuditEventListener` uses `
 
 `AuditEventListener` depends on the one-method `AuditRecorder` interface (implemented by `JpaAuditRecorder`), not on a repository. `details` is a small JSON object built with Jackson, e.g. `{"versionNumber":"2","action":"SUBMIT"}`.
 
-### 6.1 Notification dispatch
+#### 2.4.1 Notification dispatch
 
 `NotificationListener` turns four of these events into notifications. Assignment and resubmission are `ProjectStatusChangedEvent`s, a decision is a `ReviewRecordedEvent` and a reassignment is a `ReviewerReassignedEvent`.
 
@@ -272,11 +328,11 @@ Sequence for one event, for example a reviewer requesting changes:
 4. It builds a transient `Notification(recipient, project, type, message)` and calls `NotificationDispatcher.dispatch`.
 5. The dispatcher hands it to each enabled channel in configured order (`in-app`, then `email` by default), each wrapped in `RetryingNotificationChannel`. `InAppNotificationChannel` calls `NotificationService.create`, which runs in its own transaction (`REQUIRES_NEW`) and flushes inside it, so a failing INSERT throws inside the retry loop and every attempt starts clean; `EmailNotificationChannel` writes it to the log.
 6. A channel that still throws after its retries is logged at WARN and the next channel runs. No row is stored for that recipient, and the other notifications of the event still go out, because each has its own transaction. The business transaction has already committed, so a delivery failure can never undo the review, assignment or resubmission or its audit entry.
-7. The recipient reads it through `GET /api/notifications` (section 10.8).
+7. The recipient reads it through `GET /api/notifications` (section 7.8).
 
 ![Observer and Strategy](uml/png/12_events_and_strategies.png)
 
-## 7. Review decision strategies (Strategy)
+### 2.5 Review decision strategies (Strategy)
 
 `ReviewDecisionHandler`: `ReviewDecision decision()` and `void apply(UUID projectId, Actor actor, String comments)`.
 
@@ -296,13 +352,17 @@ Sequence for one event, for example a reviewer requesting changes:
 
 Because step 4 runs before step 5 inside one transaction, a failed transition never leaves a review row behind.
 
-## 8. Class catalogue
+### 2.6 Class catalogue
 
 Generated from `backend/src/main/java` (122 classes). Private helper methods are omitted; private fields are listed.
 
-### 8.1 Package `com.prastav`
+![Domain class diagram](uml/png/02_domain_class.png)
 
-#### `PrastavApplication`
+![Auth view](uml/png/14_auth_classes.png)
+
+#### 2.6.1 Package `com.prastav`
+
+##### `PrastavApplication`
 
 *class* · `src/main/java/com/prastav/PrastavApplication.java`
 
@@ -313,9 +373,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public static void main(String[] args)`
 
 
-### 8.2 Package `com.prastav.common`
+#### 2.6.2 Package `com.prastav.common`
 
-#### `ApiError`
+##### `ApiError`
 
 *record* · `src/main/java/com/prastav/common/ApiError.java`
 
@@ -327,7 +387,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public static ApiError of(ErrorCode code, String message, String path, List<FieldErrorDetail> fieldErrors)`
 
-#### `BaseEntity`
+##### `BaseEntity`
 
 *abstract class* `implements Persistable<UUID>` · @MappedSuperclass · `src/main/java/com/prastav/common/BaseEntity.java`
 
@@ -349,7 +409,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public boolean equals(Object other)`
 - `public int hashCode()`
 
-#### `ConflictException`
+##### `ConflictException`
 
 *class* `extends PrastavException` · `src/main/java/com/prastav/common/ConflictException.java`
 
@@ -359,7 +419,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public ConflictException(String message)`
 
-#### `ErrorCode`
+##### `ErrorCode`
 
 *enum* · `src/main/java/com/prastav/common/ErrorCode.java`
 
@@ -375,7 +435,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public int httpStatus()`
 
-#### `FieldErrorDetail`
+##### `FieldErrorDetail`
 
 *record* · `src/main/java/com/prastav/common/FieldErrorDetail.java`
 
@@ -383,7 +443,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `String field, String message`
 
-#### `ForbiddenException`
+##### `ForbiddenException`
 
 *class* `extends PrastavException` · `src/main/java/com/prastav/common/ForbiddenException.java`
 
@@ -393,7 +453,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public ForbiddenException(String message)`
 
-#### `GlobalExceptionHandler`
+##### `GlobalExceptionHandler`
 
 *class* · @RestControllerAdvice · `src/main/java/com/prastav/common/GlobalExceptionHandler.java`
 
@@ -415,7 +475,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ResponseEntity<ApiError> handleNoResource(NoResourceFoundException ex, HttpServletRequest request)`
 - `public ResponseEntity<ApiError> handleUnexpected(Exception ex, HttpServletRequest request)`
 
-#### `NotFoundException`
+##### `NotFoundException`
 
 *class* `extends PrastavException` · `src/main/java/com/prastav/common/NotFoundException.java`
 
@@ -425,13 +485,13 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public NotFoundException(String entityName, Object id)`
 
-#### `OpenApiConfig`
+##### `OpenApiConfig`
 
 *class* · @Configuration · `src/main/java/com/prastav/common/OpenApiConfig.java`
 
 **Responsibility.** Swagger UI metadata and the "Authorize" button for Bearer JWTs.
 
-#### `PrastavException`
+##### `PrastavException`
 
 *abstract class* `extends RuntimeException` · `src/main/java/com/prastav/common/PrastavException.java`
 
@@ -446,7 +506,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `protected PrastavException(ErrorCode code, String message)`
 - `public ErrorCode getCode()`
 
-#### `UnauthenticatedException`
+##### `UnauthenticatedException`
 
 *class* `extends PrastavException` · `src/main/java/com/prastav/common/UnauthenticatedException.java`
 
@@ -456,7 +516,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public UnauthenticatedException(String message)`
 
-#### `ValidationException`
+##### `ValidationException`
 
 *class* `extends PrastavException` · `src/main/java/com/prastav/common/ValidationException.java`
 
@@ -468,9 +528,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ValidationException(String message)`
 
 
-### 8.3 Package `com.prastav.auth`
+#### 2.6.3 Package `com.prastav.auth`
 
-#### `Actor`
+##### `Actor`
 
 *record* · `src/main/java/com/prastav/auth/Actor.java`
 
@@ -482,7 +542,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public boolean hasRole(Role expected)`
 
-#### `AuthResult`
+##### `AuthResult`
 
 *record* · `src/main/java/com/prastav/auth/AuthResult.java`
 
@@ -490,7 +550,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `String token, User user`
 
-#### `AuthService`
+##### `AuthService`
 
 *class* · @Service · `src/main/java/com/prastav/auth/AuthService.java`
 
@@ -509,7 +569,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public AuthResult register(String name, String email, String password, Role role)`: `role` may be null; anything but STUDENT is rejected; the email must pass `EmailPolicy.requireStudent`
 - `public AuthResult login(String email, String password)`
 
-#### `DemoDataSeeder`
+##### `DemoDataSeeder`
 
 *class* `implements ApplicationRunner` · @Component · `src/main/java/com/prastav/auth/DemoDataSeeder.java`
 
@@ -530,7 +590,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public void run(ApplicationArguments args)`
 - `private String email(String localPart)`
 
-#### `EmailPolicy`
+##### `EmailPolicy`
 
 *interface* · `src/main/java/com/prastav/auth/EmailPolicy.java`
 
@@ -541,7 +601,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `String requireInstitutional(String email)`: the trimmed, lower-case email if it is on the institution's domain
 - `StudentEmail requireStudent(String email)`: the normalized email with admission year and branch parsed from it
 
-#### `InstitutionProperties`
+##### `InstitutionProperties`
 
 *record* · @ConfigurationProperties(prefix = "prastav.institution") · `src/main/java/com/prastav/auth/InstitutionProperties.java`
 
@@ -549,7 +609,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `String name, String emailDomain, String studentEmailPattern` (all `@NotBlank`)
 
-#### `JwtAuthenticationFilter`
+##### `JwtAuthenticationFilter`
 
 *class* `extends OncePerRequestFilter` · `src/main/java/com/prastav/auth/JwtAuthenticationFilter.java`
 
@@ -565,7 +625,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public JwtAuthenticationFilter(JwtService jwtService)`
 - `protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)`
 
-#### `JwtService`
+##### `JwtService`
 
 *class* · @Service · `src/main/java/com/prastav/auth/JwtService.java`
 
@@ -584,7 +644,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public String generateToken(User user)`
 - `public Optional<Actor> parse(String token)`
 
-#### `PatternEmailPolicy`
+##### `PatternEmailPolicy`
 
 *class* `implements EmailPolicy` · @Component · `src/main/java/com/prastav/auth/PatternEmailPolicy.java`
 
@@ -603,7 +663,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public String requireInstitutional(String email)`
 - `public StudentEmail requireStudent(String email)`
 
-#### `RestAuthErrorHandler`
+##### `RestAuthErrorHandler`
 
 *class* `implements AuthenticationEntryPoint, AccessDeniedHandler` · @Component · `src/main/java/com/prastav/auth/RestAuthErrorHandler.java`
 
@@ -619,7 +679,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException) throws IOException`
 - `public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException) throws IOException`
 
-#### `Role`
+##### `Role`
 
 *enum* · `src/main/java/com/prastav/auth/Role.java`
 
@@ -627,7 +687,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Constants:** `STUDENT`, `FACULTY`, `COORDINATOR`
 
-#### `SecurityConfig`
+##### `SecurityConfig`
 
 *class* · @Configuration · `src/main/java/com/prastav/auth/SecurityConfig.java`
 
@@ -646,7 +706,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public CorsConfigurationSource corsConfigurationSource()`
 - `public PasswordEncoder passwordEncoder()`
 
-#### `StudentEmail`
+##### `StudentEmail`
 
 *record* · `src/main/java/com/prastav/auth/StudentEmail.java`
 
@@ -654,7 +714,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `String email, int admissionYear, String branch`
 
-#### `User`
+##### `User`
 
 *class* `extends BaseEntity` · @Entity · `src/main/java/com/prastav/auth/User.java`
 
@@ -682,7 +742,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public Integer getAdmissionYear()`
 - `public String getBranch()`
 
-#### `UserRepository`
+##### `UserRepository`
 
 *interface* `extends JpaRepository<User, UUID>` · `src/main/java/com/prastav/auth/UserRepository.java`
 
@@ -695,7 +755,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `List<User> findByRoleOrderByNameAsc(Role role)`
 - `List<User> findAllByOrderByNameAsc()`
 
-#### `UserService`
+##### `UserService`
 
 *class* · @Service · `src/main/java/com/prastav/auth/UserService.java`
 
@@ -716,9 +776,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public User createAccount(Actor actor, String name, String email, String password, Role role)`: coordinator only (403 otherwise); STUDENT rejected (400); email must pass `EmailPolicy.requireInstitutional`; duplicate email 400
 
 
-### 8.4 Package `com.prastav.auth.web`
+#### 2.6.4 Package `com.prastav.auth.web`
 
-#### `AuthController`
+##### `AuthController`
 
 *class* · @RestController · `src/main/java/com/prastav/auth/web/AuthController.java`
 
@@ -736,7 +796,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public AuthResponse login(LoginRequest request)`
 - `public UserResponse me(Actor actor)`
 
-#### `AuthResponse`
+##### `AuthResponse`
 
 *record* · `src/main/java/com/prastav/auth/web/AuthResponse.java`
 
@@ -744,7 +804,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `String token, UserResponse user`
 
-#### `CreateUserRequest`
+##### `CreateUserRequest`
 
 *record* · `src/main/java/com/prastav/auth/web/CreateUserRequest.java`
 
@@ -752,7 +812,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `String name, String email, String password, Role role` (`@NotBlank`/`@Size` as `RegisterRequest`, `@NotNull` role)
 
-#### `LoginRequest`
+##### `LoginRequest`
 
 *record* · `src/main/java/com/prastav/auth/web/LoginRequest.java`
 
@@ -760,7 +820,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `String email, String password`
 
-#### `RegisterRequest`
+##### `RegisterRequest`
 
 *record* · `src/main/java/com/prastav/auth/web/RegisterRequest.java`
 
@@ -768,7 +828,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `String name, String email, String password, Role role`
 
-#### `UserController`
+##### `UserController`
 
 *class* · @RestController · `src/main/java/com/prastav/auth/web/UserController.java`
 
@@ -784,7 +844,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public List<UserResponse> list(Role role)`
 - `public UserResponse create(Actor actor, CreateUserRequest request)`
 
-#### `UserMapper`
+##### `UserMapper`
 
 *final class* · `src/main/java/com/prastav/auth/web/UserMapper.java`
 
@@ -796,7 +856,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public static UserSummary toSummary(User user)`
 - `public static AuthResponse toAuthResponse(AuthResult result)`
 
-#### `UserResponse`
+##### `UserResponse`
 
 *record* · `src/main/java/com/prastav/auth/web/UserResponse.java`
 
@@ -804,7 +864,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID id, String name, String email, Role role, Integer admissionYear, String branch`
 
-#### `UserSummary`
+##### `UserSummary`
 
 *record* · `src/main/java/com/prastav/auth/web/UserSummary.java`
 
@@ -813,9 +873,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Components:** `UUID id, String name`
 
 
-### 8.5 Package `com.prastav.workflow`
+#### 2.6.5 Package `com.prastav.workflow`
 
-#### `Action`
+##### `Action`
 
 *enum* · `src/main/java/com/prastav/workflow/Action.java`
 
@@ -823,7 +883,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Constants:** `SUBMIT`, `ASSIGN_REVIEWER`, `APPROVE`, `REQUEST_REVISION`, `REJECT`, `REASSIGN_REVIEWER`, `EDIT_DRAFT`, `CREATE_REVISION`
 
-#### `AllowedActionsResolver`
+##### `AllowedActionsResolver`
 
 *class* · @Component · `src/main/java/com/prastav/workflow/AllowedActionsResolver.java`
 
@@ -838,7 +898,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public AllowedActionsResolver(ProjectStateFactory stateFactory)`
 - `public Set<Action> resolve(Project project, Actor actor, boolean hasOpenDraft)`
 
-#### `ApprovedState`
+##### `ApprovedState`
 
 *class* `implements ProjectState` · @Component · `src/main/java/com/prastav/workflow/ApprovedState.java`
 
@@ -849,7 +909,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ProjectStatus status()`
 - `public Set<Action> availableActions()`
 
-#### `DraftState`
+##### `DraftState`
 
 *class* `implements ProjectState` · @Component · `src/main/java/com/prastav/workflow/DraftState.java`
 
@@ -861,7 +921,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public Set<Action> availableActions()`
 - `public void submit(Project project, Actor actor, ProposalVersion draft)`
 
-#### `Guards`
+##### `Guards`
 
 *final class* · `src/main/java/com/prastav/workflow/Guards.java`
 
@@ -876,7 +936,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public static void requireOpenDraft(ProposalVersion draft)`
 - `public static void requireComplete(ProposalVersion draft)`
 
-#### `IllegalTransitionException`
+##### `IllegalTransitionException`
 
 *class* `extends PrastavException` · `src/main/java/com/prastav/workflow/IllegalTransitionException.java`
 
@@ -893,7 +953,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ProjectStatus getFrom()`
 - `public Action getAction()`
 
-#### `ProjectState`
+##### `ProjectState`
 
 *interface* · `src/main/java/com/prastav/workflow/ProjectState.java`
 
@@ -910,7 +970,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `default void requestRevision(Project project, Actor actor, String comments)`
 - `default void reject(Project project, Actor actor, String comments)`
 
-#### `ProjectStateFactory`
+##### `ProjectStateFactory`
 
 *class* · @Component · `src/main/java/com/prastav/workflow/ProjectStateFactory.java`
 
@@ -925,7 +985,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ProjectStateFactory(List<ProjectState> stateBeans)`
 - `public ProjectState stateOf(ProjectStatus status)`
 
-#### `ProjectStatus`
+##### `ProjectStatus`
 
 *enum* · `src/main/java/com/prastav/workflow/ProjectStatus.java`
 
@@ -937,7 +997,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public boolean isTerminal()`
 
-#### `ProjectStatusChangedEvent`
+##### `ProjectStatusChangedEvent`
 
 *record* · `src/main/java/com/prastav/workflow/ProjectStatusChangedEvent.java`
 
@@ -945,7 +1005,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID projectId, UUID actorId, Action action, ProjectStatus fromStatus, ProjectStatus toStatus, Map<String, String> details`
 
-#### `ReviewerReassignedEvent`
+##### `ReviewerReassignedEvent`
 
 *record* · `src/main/java/com/prastav/workflow/ReviewerReassignedEvent.java`
 
@@ -953,7 +1013,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID projectId, UUID actorId, UUID previousReviewerId, UUID newReviewerId`
 
-#### `RejectedState`
+##### `RejectedState`
 
 *class* `implements ProjectState` · @Component · `src/main/java/com/prastav/workflow/RejectedState.java`
 
@@ -964,7 +1024,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ProjectStatus status()`
 - `public Set<Action> availableActions()`
 
-#### `RevisionRequestedState`
+##### `RevisionRequestedState`
 
 *class* `implements ProjectState` · @Component · `src/main/java/com/prastav/workflow/RevisionRequestedState.java`
 
@@ -976,7 +1036,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public Set<Action> availableActions()`
 - `public void submit(Project project, Actor actor, ProposalVersion draft)`
 
-#### `SubmittedState`
+##### `SubmittedState`
 
 *class* `implements ProjectState` · @Component · `src/main/java/com/prastav/workflow/SubmittedState.java`
 
@@ -988,7 +1048,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public Set<Action> availableActions()`
 - `public void assignReviewer(Project project, User faculty, Actor actor)`
 
-#### `UnderReviewState`
+##### `UnderReviewState`
 
 *class* `implements ProjectState` · @Component · `src/main/java/com/prastav/workflow/UnderReviewState.java`
 
@@ -1003,7 +1063,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public void reject(Project project, Actor actor, String comments)`
 - `public void reassignReviewer(Project project, User faculty, Actor actor)`: COORDINATOR only (403); ValidationException (400) when the new reviewer is not FACULTY or is already the assigned reviewer; then `Project.assignReviewer`
 
-#### `WorkflowService`
+##### `WorkflowService`
 
 *class* · @Service · `src/main/java/com/prastav/workflow/WorkflowService.java`
 
@@ -1028,9 +1088,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public Project reject(UUID projectId, Actor actor, String comments)`
 
 
-### 8.6 Package `com.prastav.project`
+#### 2.6.6 Package `com.prastav.project`
 
-#### `DashboardService`
+##### `DashboardService`
 
 *class* · @Service · `src/main/java/com/prastav/project/DashboardService.java`
 
@@ -1047,7 +1107,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public DashboardService(ProjectService projectService, ProjectRepository projectRepository, ProjectAccessPolicy accessPolicy)`
 - `public DashboardSummary summary(Actor actor)`: COORDINATOR only (FORBIDDEN otherwise); counts from `ProjectService.countProjects`, then `findAwaitingAssignment(SUBMITTED)` and `reviewerWorkload(FACULTY, UNDER_REVIEW)`
 
-#### `DashboardSummary`
+##### `DashboardSummary`
 
 *record* · `src/main/java/com/prastav/project/DashboardSummary.java`
 
@@ -1055,7 +1115,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `long total, Map<ProjectStatus, Long> byStatus, List<ProjectAwaitingAssignment> awaitingAssignment, List<ReviewerWorkload> reviewerWorkload`
 
-#### `NewProject`
+##### `NewProject`
 
 *record* · `src/main/java/com/prastav/project/NewProject.java`
 
@@ -1063,7 +1123,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `String title, String description, String techStack, String teamMembers`
 
-#### `Project`
+##### `Project`
 
 *class* `extends BaseEntity` · @Entity · `src/main/java/com/prastav/project/Project.java`
 
@@ -1099,7 +1159,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public Long getVersion()`
 - `public Instant getUpdatedAt()`
 
-#### `ProjectAccessPolicy`
+##### `ProjectAccessPolicy`
 
 *class* · @Component · `src/main/java/com/prastav/project/ProjectAccessPolicy.java`
 
@@ -1112,7 +1172,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public void requireOwner(Project project, Actor actor)`
 - `public void requireRole(Actor actor, Role role)`
 
-#### `ProjectAwaitingAssignment`
+##### `ProjectAwaitingAssignment`
 
 *interface* · `src/main/java/com/prastav/project/ProjectAwaitingAssignment.java`
 
@@ -1126,7 +1186,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `String getOwnerName()`
 - `Instant getWaitingSince()`
 
-#### `ProjectCounts`
+##### `ProjectCounts`
 
 *record* · `src/main/java/com/prastav/project/ProjectCounts.java`
 
@@ -1134,7 +1194,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `long total, Map<ProjectStatus, Long> byStatus, Long awaitingAssignment`
 
-#### `ProjectCreatedEvent`
+##### `ProjectCreatedEvent`
 
 *record* · `src/main/java/com/prastav/project/ProjectCreatedEvent.java`
 
@@ -1142,7 +1202,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID projectId, UUID actorId, String title`
 
-#### `ProjectHistoryService`
+##### `ProjectHistoryService`
 
 *class* · @Service · `src/main/java/com/prastav/project/ProjectHistoryService.java`
 
@@ -1162,7 +1222,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ProjectHistoryService(ProjectStore projectStore, ProjectAccessPolicy accessPolicy, ProposalService proposalService, ReviewService reviewService, AuditQueryService auditQueryService, UserService userService)`
 - `public List<TimelineEntry> history(UUID projectId, Actor actor)`
 
-#### `ProjectListItem`
+##### `ProjectListItem`
 
 *record* · `src/main/java/com/prastav/project/ProjectListItem.java`
 
@@ -1170,7 +1230,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `Project project, Instant submittedAt`
 
-#### `ProjectListQuery`
+##### `ProjectListQuery`
 
 *record* · `src/main/java/com/prastav/project/ProjectListQuery.java`
 
@@ -1185,7 +1245,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public boolean filtersByCohort()`: true when admissionYear or branch is set, which only the coordinator may do
 - `public Pageable pageable()`
 
-#### `ProjectRepository`
+##### `ProjectRepository`
 
 *interface* `extends JpaRepository<Project, UUID>, JpaSpecificationExecutor<Project>` · `src/main/java/com/prastav/project/ProjectRepository.java`
 
@@ -1200,7 +1260,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `List<ReviewerWorkload> reviewerWorkload(Role role, ProjectStatus status)`: every user with `role` and the count of their projects in `status`, zero included (left join, `GROUP BY`), busiest first then by name
 - inherited `Page<Project> findAll(Specification<Project> spec, Pageable pageable)`
 
-#### `ProjectSort`
+##### `ProjectSort`
 
 *enum* · `src/main/java/com/prastav/project/ProjectSort.java`
 
@@ -1212,7 +1272,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public Sort toSort()`
 
-#### `ProjectService`
+##### `ProjectService`
 
 *class* · @Service · `src/main/java/com/prastav/project/ProjectService.java`
 
@@ -1236,7 +1296,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ProjectCounts countProjects(Actor actor)`
 - `public ProjectView getProject(UUID projectId, Actor actor)`
 
-#### `ProjectSpecifications`
+##### `ProjectSpecifications`
 
 *final class* · `src/main/java/com/prastav/project/ProjectSpecifications.java`
 
@@ -1251,7 +1311,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public static Specification<Project> matches(String text)`
 - `public static Specification<Project> forQuery(Actor actor, ProjectListQuery listQuery)`
 
-#### `ProjectStatusCount`
+##### `ProjectStatusCount`
 
 *interface* · `src/main/java/com/prastav/project/ProjectStatusCount.java`
 
@@ -1262,7 +1322,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `ProjectStatus getStatus()`
 - `long getCount()`
 
-#### `ProjectStore`
+##### `ProjectStore`
 
 *class* · @Component · `src/main/java/com/prastav/project/ProjectStore.java`
 
@@ -1278,7 +1338,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public Project getById(UUID projectId)`
 - `public Project save(Project project)`
 
-#### `ProjectView`
+##### `ProjectView`
 
 *record* · `src/main/java/com/prastav/project/ProjectView.java`
 
@@ -1286,7 +1346,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `Project project, ProposalVersion currentProposal, Integer latestSubmittedVersion, Set<Action> allowedActions`
 
-#### `ReviewerWorkload`
+##### `ReviewerWorkload`
 
 *interface* · `src/main/java/com/prastav/project/ReviewerWorkload.java`
 
@@ -1298,7 +1358,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `String getReviewerName()`
 - `long getOpenReviews()`
 
-#### `TimelineEntry`
+##### `TimelineEntry`
 
 *record* · `src/main/java/com/prastav/project/TimelineEntry.java`
 
@@ -1306,7 +1366,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `Instant at, TimelineEntryType type, UUID actorId, String actorName, String summary, Integer versionNumber`
 
-#### `TimelineEntryType`
+##### `TimelineEntryType`
 
 *enum* · `src/main/java/com/prastav/project/TimelineEntryType.java`
 
@@ -1315,9 +1375,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Constants:** `VERSION_CREATED`, `STATUS_CHANGED`, `REVIEW`
 
 
-### 8.7 Package `com.prastav.project.web`
+#### 2.6.7 Package `com.prastav.project.web`
 
-#### `AssignReviewerRequest`
+##### `AssignReviewerRequest`
 
 *record* · `src/main/java/com/prastav/project/web/AssignReviewerRequest.java`
 
@@ -1325,7 +1385,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID facultyId`
 
-#### `AwaitingAssignmentResponse`
+##### `AwaitingAssignmentResponse`
 
 *record* · `src/main/java/com/prastav/project/web/AwaitingAssignmentResponse.java`
 
@@ -1333,7 +1393,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID id, String title, UserSummary owner, Instant waitingSince`
 
-#### `CreateProjectRequest`
+##### `CreateProjectRequest`
 
 *record* · `src/main/java/com/prastav/project/web/CreateProjectRequest.java`
 
@@ -1346,7 +1406,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public NewProject toNewProject()`
 - `public ProposalContent proposalOrEmpty()`
 
-#### `DashboardController`
+##### `DashboardController`
 
 *class* · @RestController · `src/main/java/com/prastav/project/web/DashboardController.java`
 
@@ -1361,7 +1421,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public DashboardController(DashboardService dashboardService)`
 - `public DashboardSummaryResponse summary(Actor actor)`: `GET /api/dashboard/summary`, COORDINATOR only
 
-#### `DashboardMapper`
+##### `DashboardMapper`
 
 *final class* · `src/main/java/com/prastav/project/web/DashboardMapper.java`
 
@@ -1371,7 +1431,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public static DashboardSummaryResponse toResponse(DashboardSummary summary)`
 
-#### `DashboardSummaryResponse`
+##### `DashboardSummaryResponse`
 
 *record* · `src/main/java/com/prastav/project/web/DashboardSummaryResponse.java`
 
@@ -1379,7 +1439,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `long total, Map<ProjectStatus, Long> byStatus, List<AwaitingAssignmentResponse> awaitingAssignment, List<ReviewerWorkloadResponse> reviewerWorkload`
 
-#### `ProjectController`
+##### `ProjectController`
 
 *class* · @RestController · `src/main/java/com/prastav/project/web/ProjectController.java`
 
@@ -1403,7 +1463,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ProjectDetailResponse reassign(UUID id, AssignReviewerRequest request, Actor actor)`: `PUT /{id}/assign`, COORDINATOR only
 - `public List<TimelineEntry> history(UUID id, Actor actor)`
 
-#### `ProjectCountsResponse`
+##### `ProjectCountsResponse`
 
 *record* · `src/main/java/com/prastav/project/web/ProjectCountsResponse.java`
 
@@ -1411,7 +1471,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `long total, Map<ProjectStatus, Long> byStatus, Long awaitingAssignment`
 
-#### `ProjectDetailResponse`
+##### `ProjectDetailResponse`
 
 *record* · `src/main/java/com/prastav/project/web/ProjectDetailResponse.java`
 
@@ -1419,7 +1479,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID id, String title, String description, String techStack, String teamMembers, ProjectStatus status, UserSummary owner, UserSummary reviewer, ProposalVersionResponse currentProposal, Integer latestSubmittedVersion, List<Action> allowedActions, Long version, Instant createdAt, Instant updatedAt`
 
-#### `ProjectMapper`
+##### `ProjectMapper`
 
 *final class* · `src/main/java/com/prastav/project/web/ProjectMapper.java`
 
@@ -1432,7 +1492,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public static ProjectCountsResponse toCounts(ProjectCounts counts)`
 - `public static ProjectDetailResponse toDetail(ProjectView view)`
 
-#### `ProjectPageResponse`
+##### `ProjectPageResponse`
 
 *record* · `src/main/java/com/prastav/project/web/ProjectPageResponse.java`
 
@@ -1440,7 +1500,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `List<ProjectSummaryResponse> content, int page, int size, long totalElements, int totalPages`
 
-#### `ProjectSummaryResponse`
+##### `ProjectSummaryResponse`
 
 *record* · `src/main/java/com/prastav/project/web/ProjectSummaryResponse.java`
 
@@ -1448,7 +1508,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID id, String title, String description, String teamMembers, ProjectStatus status, UserSummary owner, UserSummary reviewer, Instant submittedAt, Instant updatedAt`
 
-#### `ReviewerWorkloadResponse`
+##### `ReviewerWorkloadResponse`
 
 *record* · `src/main/java/com/prastav/project/web/ReviewerWorkloadResponse.java`
 
@@ -1457,9 +1517,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Components:** `UserSummary reviewer, long openReviews`
 
 
-### 8.8 Package `com.prastav.proposal`
+#### 2.6.8 Package `com.prastav.proposal`
 
-#### `ProposalContent`
+##### `ProposalContent`
 
 *record* · `src/main/java/com/prastav/proposal/ProposalContent.java`
 
@@ -1471,7 +1531,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public static ProposalContent empty()`
 
-#### `FieldDiff`
+##### `FieldDiff`
 
 *record* · `src/main/java/com/prastav/proposal/FieldDiff.java`
 
@@ -1479,7 +1539,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `String name, String fromValue, String toValue, boolean changed`
 
-#### `FirstSubmission`
+##### `FirstSubmission`
 
 *interface* · `src/main/java/com/prastav/proposal/FirstSubmission.java`
 
@@ -1490,7 +1550,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `UUID getProjectId()`
 - `Instant getSubmittedAt()`
 
-#### `ProposalDiff`
+##### `ProposalDiff`
 
 *record* · `src/main/java/com/prastav/proposal/ProposalDiff.java`
 
@@ -1498,7 +1558,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `int fromVersion, int toVersion, List<FieldDiff> fields`
 
-#### `ProposalDiffService`
+##### `ProposalDiffService`
 
 *class* · @Service · `src/main/java/com/prastav/proposal/ProposalDiffService.java`
 
@@ -1515,7 +1575,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ProposalDiffService(ProposalVersionRepository versionRepository, ProjectStore projectStore, ProjectAccessPolicy accessPolicy)`
 - `public ProposalDiff compare(UUID projectId, int fromVersion, int toVersion, Actor actor)`: checks `requireView` first, then rejects `fromVersion == toVersion` with `ValidationException`, then loads both versions of this project (`NotFoundException` "Proposal version N not found" when either is missing); `changed` is `!Objects.equals(fromValue, toValue)`
 
-#### `ProposalDraftUpdatedEvent`
+##### `ProposalDraftUpdatedEvent`
 
 *record* · `src/main/java/com/prastav/proposal/ProposalDraftUpdatedEvent.java`
 
@@ -1523,7 +1583,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID projectId, int versionNumber, UUID actorId`
 
-#### `ProposalService`
+##### `ProposalService`
 
 *class* · @Service · `src/main/java/com/prastav/proposal/ProposalService.java`
 
@@ -1550,7 +1610,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public Optional<ProposalVersion> findLatestSubmitted(UUID projectId)`
 - `public Map<UUID, Instant> firstSubmittedAt(Collection<UUID> projectIds)`
 
-#### `ProposalVersion`
+##### `ProposalVersion`
 
 *class* `extends BaseEntity` · @Entity · `src/main/java/com/prastav/proposal/ProposalVersion.java`
 
@@ -1592,7 +1652,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public Instant getSubmittedAt()`
 - `public UUID getCreatedBy()`
 
-#### `ProposalVersionCreatedEvent`
+##### `ProposalVersionCreatedEvent`
 
 *record* · `src/main/java/com/prastav/proposal/ProposalVersionCreatedEvent.java`
 
@@ -1600,7 +1660,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID projectId, int versionNumber, UUID actorId`
 
-#### `ProposalVersionFactory`
+##### `ProposalVersionFactory`
 
 *class* · @Component · `src/main/java/com/prastav/proposal/ProposalVersionFactory.java`
 
@@ -1611,7 +1671,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ProposalVersion initialDraft(Project project, ProposalContent content, UUID createdBy)`
 - `public ProposalVersion nextDraftFrom(ProposalVersion previous, UUID createdBy)`
 
-#### `ProposalVersionRepository`
+##### `ProposalVersionRepository`
 
 *interface* `extends JpaRepository<ProposalVersion, UUID>` · `src/main/java/com/prastav/proposal/ProposalVersionRepository.java`
 
@@ -1625,7 +1685,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `Optional<ProposalVersion> findFirstByProject_IdAndStateOrderByVersionNumberDesc(UUID projectId, ProposalVersionState state)`
 - `List<FirstSubmission> findFirstSubmissions(Collection<UUID> projectIds)`
 
-#### `ProposalVersionState`
+##### `ProposalVersionState`
 
 *enum* · `src/main/java/com/prastav/proposal/ProposalVersionState.java`
 
@@ -1634,9 +1694,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Constants:** `DRAFT`, `SUBMITTED`
 
 
-### 8.9 Package `com.prastav.proposal.web`
+#### 2.6.9 Package `com.prastav.proposal.web`
 
-#### `ProposalController`
+##### `ProposalController`
 
 *class* · @RestController · `src/main/java/com/prastav/proposal/web/ProposalController.java`
 
@@ -1655,7 +1715,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public List<ProposalVersionResponse> list(UUID projectId, Actor actor)`
 - `public ProposalDiff compare(UUID projectId, int from, int to, Actor actor)`
 
-#### `ProposalMapper`
+##### `ProposalMapper`
 
 *final class* · `src/main/java/com/prastav/proposal/web/ProposalMapper.java`
 
@@ -1665,7 +1725,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public static ProposalVersionResponse toResponse(ProposalVersion version)`
 
-#### `ProposalVersionResponse`
+##### `ProposalVersionResponse`
 
 *record* · `src/main/java/com/prastav/proposal/web/ProposalVersionResponse.java`
 
@@ -1674,9 +1734,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Components:** `UUID id, int versionNumber, ProposalVersionState state, String problemStatement, String objectives, String methodology, String expectedOutcome, String timeline, String referenceLink, List<String> missingFields, Instant submittedAt, Instant createdAt`
 
 
-### 8.10 Package `com.prastav.review`
+#### 2.6.10 Package `com.prastav.review`
 
-#### `ApproveDecisionHandler`
+##### `ApproveDecisionHandler`
 
 *class* `implements ReviewDecisionHandler` · @Component · `src/main/java/com/prastav/review/ApproveDecisionHandler.java`
 
@@ -1692,7 +1752,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ReviewDecision decision()`
 - `public void apply(UUID projectId, Actor actor, String comments)`
 
-#### `RejectDecisionHandler`
+##### `RejectDecisionHandler`
 
 *class* `implements ReviewDecisionHandler` · @Component · `src/main/java/com/prastav/review/RejectDecisionHandler.java`
 
@@ -1708,7 +1768,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ReviewDecision decision()`
 - `public void apply(UUID projectId, Actor actor, String comments)`
 
-#### `RequestRevisionDecisionHandler`
+##### `RequestRevisionDecisionHandler`
 
 *class* `implements ReviewDecisionHandler` · @Component · `src/main/java/com/prastav/review/RequestRevisionDecisionHandler.java`
 
@@ -1724,7 +1784,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ReviewDecision decision()`
 - `public void apply(UUID projectId, Actor actor, String comments)`
 
-#### `Review`
+##### `Review`
 
 *class* `extends BaseEntity` · @Entity · `src/main/java/com/prastav/review/Review.java`
 
@@ -1748,7 +1808,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ReviewDecision getDecision()`
 - `public String getComments()`
 
-#### `ReviewDecision`
+##### `ReviewDecision`
 
 *enum* · `src/main/java/com/prastav/review/ReviewDecision.java`
 
@@ -1756,7 +1816,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Constants:** `APPROVE`, `REQUEST_REVISION`, `REJECT`
 
-#### `ReviewDecisionHandler`
+##### `ReviewDecisionHandler`
 
 *interface* · `src/main/java/com/prastav/review/ReviewDecisionHandler.java`
 
@@ -1767,7 +1827,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `ReviewDecision decision()`
 - `void apply(UUID projectId, Actor actor, String comments)`
 
-#### `ReviewRecordedEvent`
+##### `ReviewRecordedEvent`
 
 *record* · `src/main/java/com/prastav/review/ReviewRecordedEvent.java`
 
@@ -1775,7 +1835,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `UUID projectId, UUID reviewId, int versionNumber, UUID reviewerId, ReviewDecision decision`
 
-#### `ReviewRepository`
+##### `ReviewRepository`
 
 *interface* `extends JpaRepository<Review, UUID>` · `src/main/java/com/prastav/review/ReviewRepository.java`
 
@@ -1785,7 +1845,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `List<Review> findByProject_IdOrderByCreatedAtAsc(UUID projectId)`
 
-#### `ReviewService`
+##### `ReviewService`
 
 *class* · @Service · `src/main/java/com/prastav/review/ReviewService.java`
 
@@ -1808,9 +1868,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public List<Review> listReviews(UUID projectId, Actor actor)`
 
 
-### 8.11 Package `com.prastav.review.web`
+#### 2.6.11 Package `com.prastav.review.web`
 
-#### `ReviewController`
+##### `ReviewController`
 
 *class* · @RestController · `src/main/java/com/prastav/review/web/ReviewController.java`
 
@@ -1826,7 +1886,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public ReviewResponse record(UUID projectId, ReviewRequest request, Actor actor)`
 - `public List<ReviewResponse> list(UUID projectId, Actor actor)`
 
-#### `ReviewMapper`
+##### `ReviewMapper`
 
 *final class* · `src/main/java/com/prastav/review/web/ReviewMapper.java`
 
@@ -1836,7 +1896,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public static ReviewResponse toResponse(Review review)`
 
-#### `ReviewRequest`
+##### `ReviewRequest`
 
 *record* · `src/main/java/com/prastav/review/web/ReviewRequest.java`
 
@@ -1844,7 +1904,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Components:** `ReviewDecision decision, String comments, Integer versionNumber`
 
-#### `ReviewResponse`
+##### `ReviewResponse`
 
 *record* · `src/main/java/com/prastav/review/web/ReviewResponse.java`
 
@@ -1853,9 +1913,9 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Components:** `UUID id, int versionNumber, ReviewDecision decision, String comments, UserSummary reviewer, Instant createdAt`
 
 
-### 8.12 Package `com.prastav.audit`
+#### 2.6.12 Package `com.prastav.audit`
 
-#### `AuditAction`
+##### `AuditAction`
 
 *enum* · `src/main/java/com/prastav/audit/AuditAction.java`
 
@@ -1863,7 +1923,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 **Constants:** `PROJECT_CREATED`, `VERSION_CREATED`, `DRAFT_UPDATED`, `PROPOSAL_SUBMITTED`, `REVIEWER_ASSIGNED`, `REVIEWER_REASSIGNED`, `REVIEW_RECORDED`, `STATUS_CHANGED`
 
-#### `AuditEventListener`
+##### `AuditEventListener`
 
 *class* · @Component · `src/main/java/com/prastav/audit/AuditEventListener.java`
 
@@ -1884,7 +1944,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public void on(ReviewerReassignedEvent event)`: REVIEWER_REASSIGNED with previousReviewerId and reviewerId in details
 - `public void on(ReviewRecordedEvent event)`
 
-#### `AuditLog`
+##### `AuditLog`
 
 *class* `extends BaseEntity` · @Entity · `src/main/java/com/prastav/audit/AuditLog.java`
 
@@ -1920,7 +1980,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public Builder details(String details)`
 - `public AuditLog build()`
 
-#### `AuditLogRepository`
+##### `AuditLogRepository`
 
 *interface* `extends JpaRepository<AuditLog, UUID>` · `src/main/java/com/prastav/audit/AuditLogRepository.java`
 
@@ -1931,7 +1991,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `List<AuditLog> findByProjectIdOrderByCreatedAtAsc(UUID projectId)`
 - inherited `Page<AuditLog> findAll(Specification<AuditLog> spec, Pageable pageable)`
 
-#### `AuditQuery`
+##### `AuditQuery`
 
 *record* · `src/main/java/com/prastav/audit/AuditQuery.java`
 
@@ -1944,7 +2004,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public static AuditQuery of(UUID projectId, UUID actorId, AuditAction action, Instant from, Instant to, Integer page, Integer size)`: page 0 and 20 rows unless given
 - `public Pageable pageable()`: newest first (`createdAt` descending, then `id` descending so the order is stable across pages)
 
-#### `AuditQueryService`
+##### `AuditQueryService`
 
 *class* · @Service · `src/main/java/com/prastav/audit/AuditQueryService.java`
 
@@ -1960,7 +2020,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public List<AuditLog> findByProject(UUID projectId)`
 - `public Page<AuditLog> search(AuditQuery query, Actor actor)`: one page matching the filters, newest first; any role but COORDINATOR gets `ForbiddenException` before any read
 
-#### `AuditRecorder`
+##### `AuditRecorder`
 
 *interface* · `src/main/java/com/prastav/audit/AuditRecorder.java`
 
@@ -1970,7 +2030,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `void record(AuditLog entry)`
 
-#### `AuditSpecifications`
+##### `AuditSpecifications`
 
 *final class* · `src/main/java/com/prastav/audit/AuditSpecifications.java`
 
@@ -1985,7 +2045,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public static Specification<AuditLog> createdUntil(Instant to)`
 - `public static Specification<AuditLog> forQuery(AuditQuery auditQuery)`
 
-#### `JpaAuditRecorder`
+##### `JpaAuditRecorder`
 
 *class* `implements AuditRecorder` · @Component · `src/main/java/com/prastav/audit/JpaAuditRecorder.java`
 
@@ -2000,7 +2060,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public JpaAuditRecorder(AuditLogRepository auditLogRepository)`
 - `public void record(AuditLog entry)`
 
-### 8.13 Package `com.prastav.notification`
+#### 2.6.13 Package `com.prastav.notification`
 
 **Delivery (Strategy).** A notification is delivered through `NotificationDispatcher.dispatch(Notification)`. Each delivery route is a `NotificationChannel` strategy: `InAppNotificationChannel` stores it through `NotificationService.create`, and `EmailNotificationChannel` writes the email to the log without sending anything. `prastav.notification.enabled-channels` (`NOTIFICATION_CHANNELS`, default `in-app,email`) lists the channels in the order they run.
 
@@ -2008,7 +2068,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 ![Notification channels](uml/png/13_notification_classes.png)
 
-#### `EmailNotificationChannel`
+##### `EmailNotificationChannel`
 
 *class* `implements NotificationChannel` · @Component · `src/main/java/com/prastav/notification/EmailNotificationChannel.java`
 
@@ -2019,7 +2079,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public String name()`: `"email"` (`NAME`)
 - `public void deliver(Notification notification)`: logs recipient email, type and message at INFO
 
-#### `InAppNotificationChannel`
+##### `InAppNotificationChannel`
 
 *class* `implements NotificationChannel` · @Component · `src/main/java/com/prastav/notification/InAppNotificationChannel.java`
 
@@ -2035,7 +2095,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public String name()`: `"in-app"` (`NAME`)
 - `public void deliver(Notification notification)`: `NotificationService.create(recipient, project, type, message)`
 
-#### `Notification`
+##### `Notification`
 
 *class* `extends BaseEntity` · @Entity · `src/main/java/com/prastav/notification/Notification.java`
 
@@ -2061,7 +2121,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public String getMessage()`
 - `public boolean isRead()`
 
-#### `NotificationChannel`
+##### `NotificationChannel`
 
 *interface* · `src/main/java/com/prastav/notification/NotificationChannel.java`
 
@@ -2072,7 +2132,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `String name()`: the name used in `prastav.notification.enabled-channels`
 - `void deliver(Notification notification)`
 
-#### `NotificationDispatcher`
+##### `NotificationDispatcher`
 
 *class* · @Component · `src/main/java/com/prastav/notification/NotificationDispatcher.java`
 
@@ -2087,7 +2147,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public NotificationDispatcher(List<NotificationChannel> channels, NotificationProperties properties)`: resolves the configured names to channels and wraps each in a RetryingNotificationChannel; IllegalStateException for an unknown name
 - `public void dispatch(Notification notification)`: calls `deliver` on each enabled channel; a RuntimeException left after the retries is logged at WARN and the next channel runs
 
-#### `NotificationListener`
+##### `NotificationListener`
 
 *class* · @Component · `src/main/java/com/prastav/notification/NotificationListener.java`
 
@@ -2107,7 +2167,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 - `public void on(ReviewRecordedEvent event)`: `@TransactionalEventListener`, `@Transactional(NOT_SUPPORTED)`; notifies the project owner (REVIEW_DECISION)
 - `private void notify(User recipient, Project project, NotificationType type, String message)`: dispatches a new `Notification`
 
-#### `NotificationProperties`
+##### `NotificationProperties`
 
 *record* · @ConfigurationProperties(prefix = "prastav.notification") · @Validated · `src/main/java/com/prastav/notification/NotificationProperties.java`
 
@@ -2117,7 +2177,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull Duration delay` (attempts including the first one, and the pause between two attempts).
 
-#### `NotificationRepository`
+##### `NotificationRepository`
 
 *interface* `extends JpaRepository<Notification, UUID>` · `src/main/java/com/prastav/notification/NotificationRepository.java`
 
@@ -2130,7 +2190,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 - `long countByRecipientIdAndReadFalse(UUID recipientId)`
 - `int markAllReadFor(UUID recipientId)`: `@Modifying` JPQL update of the recipient's unread rows
 
-#### `NotificationService`
+##### `NotificationService`
 
 *class* · @Service · `src/main/java/com/prastav/notification/NotificationService.java`
 
@@ -2151,7 +2211,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 - `public Notification markRead(UUID notificationId, Actor actor)`: 404 NOT_FOUND for an unknown id, 403 FORBIDDEN for another user's notification
 - `public int markAllRead(Actor actor)`: returns the number of notifications changed
 
-#### `RetryingNotificationChannel`
+##### `RetryingNotificationChannel`
 
 *class* `implements NotificationChannel` · `src/main/java/com/prastav/notification/RetryingNotificationChannel.java`
 
@@ -2169,7 +2229,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 - `public String name()`: the wrapped channel's name
 - `public void deliver(Notification notification)`: returns on the first successful attempt; logs each failed attempt that will be retried at INFO; rethrows the last exception after maxAttempts failures; an interrupt during the pause stops retrying and rethrows
 
-#### `NotificationType`
+##### `NotificationType`
 
 *enum* · `src/main/java/com/prastav/notification/NotificationType.java`
 
@@ -2177,9 +2237,9 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 **Constants:** `REVIEWER_ASSIGNED`, `REVIEWER_UNASSIGNED`, `REVIEW_DECISION`, `RESUBMITTED`
 
-### 8.14 Package `com.prastav.notification.web`
+#### 2.6.14 Package `com.prastav.notification.web`
 
-#### `MarkAllReadResponse`
+##### `MarkAllReadResponse`
 
 *record* · `src/main/java/com/prastav/notification/web/MarkAllReadResponse.java`
 
@@ -2187,7 +2247,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 **Components:** `int updated`
 
-#### `NotificationController`
+##### `NotificationController`
 
 *class* · @RestController · @PreAuthorize("hasAnyRole('STUDENT', 'FACULTY', 'COORDINATOR')") · `src/main/java/com/prastav/notification/web/NotificationController.java`
 
@@ -2205,7 +2265,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 - `public NotificationResponse markRead(UUID id, Actor actor)`
 - `public MarkAllReadResponse markAllRead(Actor actor)`
 
-#### `NotificationMapper`
+##### `NotificationMapper`
 
 *final class* · `src/main/java/com/prastav/notification/web/NotificationMapper.java`
 
@@ -2216,7 +2276,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 - `public static NotificationResponse toResponse(Notification notification)`
 - `public static NotificationPageResponse toPage(Page<Notification> page)`
 
-#### `NotificationPageResponse`
+##### `NotificationPageResponse`
 
 *record* · `src/main/java/com/prastav/notification/web/NotificationPageResponse.java`
 
@@ -2224,7 +2284,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 **Components:** `List<NotificationResponse> content, int page, int size, long totalElements, int totalPages`
 
-#### `NotificationResponse`
+##### `NotificationResponse`
 
 *record* · `src/main/java/com/prastav/notification/web/NotificationResponse.java`
 
@@ -2232,7 +2292,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 **Components:** `UUID id, NotificationType type, String message, UUID projectId, String projectTitle, boolean read, Instant createdAt`
 
-#### `UnreadCountResponse`
+##### `UnreadCountResponse`
 
 *record* · `src/main/java/com/prastav/notification/web/UnreadCountResponse.java`
 
@@ -2240,9 +2300,9 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 **Components:** `long count`
 
-### 8.15 Package `com.prastav.audit.web`
+#### 2.6.15 Package `com.prastav.audit.web`
 
-#### `AuditController`
+##### `AuditController`
 
 *class* · @RestController · `src/main/java/com/prastav/audit/web/AuditController.java`
 
@@ -2257,7 +2317,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 - `public AuditController(AuditQueryService auditQueryService)`
 - `public AuditPageResponse search(UUID projectId, UUID actorId, AuditAction action, Instant from, Instant to, Integer page, Integer size, Actor actor)`: `GET /api/audit`, COORDINATOR only
 
-#### `AuditLogResponse`
+##### `AuditLogResponse`
 
 *record* · `src/main/java/com/prastav/audit/web/AuditLogResponse.java`
 
@@ -2265,7 +2325,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 **Components:** `UUID id, UUID projectId, UUID actorId, AuditAction action, ProjectStatus fromStatus, ProjectStatus toStatus, String details, Instant createdAt`
 
-#### `AuditMapper`
+##### `AuditMapper`
 
 *final class* · `src/main/java/com/prastav/audit/web/AuditMapper.java`
 
@@ -2276,7 +2336,7 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 - `public static AuditLogResponse toResponse(AuditLog log)`
 - `public static AuditPageResponse toPage(Page<AuditLog> page)`
 
-#### `AuditPageResponse`
+##### `AuditPageResponse`
 
 *record* · `src/main/java/com/prastav/audit/web/AuditPageResponse.java`
 
@@ -2284,127 +2344,150 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 **Components:** `List<AuditLogResponse> content, int page, int size, long totalElements, int totalPages`
 
-## 9. Database schema
+### 2.7 Frontend architecture
 
-Owned by Flyway (`V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`, `V5__notification_reviewer_unassigned.sql`, `V6__audit_query_indexes.sql`); Hibernate runs with `ddl-auto: none`. All ids are application-generated UUIDs; all timestamps are `TIMESTAMPTZ` stored in UTC.
+The web app (`frontend/`, artifact `prastav-frontend`) is a React 18 + TypeScript single-page app built with Vite. Styling is Tailwind CSS 3 with the design tokens in `tailwind.config.js` (documented in `docs/design/README.md`); icons come from lucide-react and the Plus Jakarta Sans font is self-hosted.
 
-![ER diagram](uml/png/10_er.png)
+#### 2.7.1 Routing and guards
 
-### 9.1 `users`
+`src/router.tsx` defines one `createBrowserRouter` tree (a data router, which the wizard needs for `useBlocker`).
 
-| Column | Type | Constraints |
+| Route | Element | Guard |
 |---|---|---|
-| id | UUID | PK |
-| name | VARCHAR(120) | NOT NULL |
-| email | VARCHAR(255) | NOT NULL, UNIQUE (stored lower-case) |
-| password_hash | VARCHAR(100) | NOT NULL (BCrypt) |
-| role | VARCHAR(20) | NOT NULL, CHECK in (STUDENT, FACULTY, COORDINATOR) |
-| admission_year | INTEGER | nullable; 2000 + YY from a student email |
-| branch | VARCHAR(20) | nullable; upper-case branch from a student email, e.g. CSAI |
-| created_at | TIMESTAMPTZ | NOT NULL |
+| `/` | `LandingPage` (redirects a signed-in user to `/app`) | none |
+| `/login`, `/register` | `LoginPage`, `RegisterPage` inside `AuthLayout` | none (a signed-in user is redirected) |
+| `/app` | `AppShell` with `HomePage` (`StudentHome`, `FacultyHome` or `CoordinatorHome`) | `RequireAuth` |
+| `/app/projects` | `ProjectsPage` configured by role (My, Assigned or All Projects) | `RequireAuth` |
+| `/app/projects/new`, `/app/projects/:id/edit` | `ProjectWizardPage` | `RequireAuth roles=[STUDENT]` |
+| `/app/projects/:id` | `ProjectDetailPage` | `RequireAuth` (the API enforces participation) |
+| `/app/reviews` | `ProjectsPage mode="reviews"` (Under Review, oldest first) | `RequireAuth roles=[FACULTY, COORDINATOR]` |
+| `/app/dashboard` | `DashboardPage` (status counts, waiting for assignment, reviewer workload) | `RequireAuth roles=[COORDINATOR]` |
+| `/app/assign` | `AssignPage` (Submitted projects) | `RequireAuth roles=[COORDINATOR]` |
+| `/app/notifications` | `NotificationsPage` (the caller's whole inbox) | `RequireAuth` (the API scopes the inbox to the caller) |
 
-Index `idx_users_admission_year_branch` on (admission_year, branch) for cohort filters. Staff rows leave both columns null.
+`RequireAuth` sends an anonymous visitor to `/login` with the requested path in the navigation state, so signing in returns there; a wrong role goes to `/app`. Route guards only shape navigation: every rule is enforced again by the API.
 
-### 9.2 `projects`
+#### 2.7.2 Layouts and component structure
 
-| Column | Type | Constraints |
+| Folder | Contents |
+|---|---|
+| `src/layouts/` | `AppShell`: sidebar with role navigation from `config/navigation.ts` (a drawer below the `lg` breakpoint), top bar with global search (navigates to `/app/projects?q=`), `NotificationBell` and the account menu; `AuthLayout`: split layout for sign in and registration |
+| `src/components/ui/` | Design system: `Button`, `Input`/`Textarea`/`Select`, `Card`, `StatCard`, `StatusPill`, `Avatar`/`AvatarStack`, `DataTable`, `Pagination`, `FilterBar`, `Tabs`, `Stepper`, `DropdownMenu`, `Modal`, `ToastProvider`, `Skeleton`, `EmptyState`, `PageHeader`, `CtaBand`, `Logo` |
+| `src/components/` | Domain components: `WorkflowRail`, `ReviewPanel`, `AssignReviewerPanel`, `NotificationBell` (unread badge and a dropdown of the latest five), `NotificationItem` (one inbox row, shared by the dropdown and the page), `ProposalFields`/`ProposalView`, `VersionCompare` (two version pickers, every field side by side, changed fields highlighted), `ErrorNote`, and the label maps in `labels.ts` (including the timeline entry types) |
+| `src/pages/` | One file per screen; `pages/home/` holds the role homes and `pages/projects/` the shared table columns and the assign dialog |
+| `src/config/` | `brand.ts` (product name, tagline, institution), `navigation.ts`, `demoAccounts.ts` |
+| `src/assets/` | Illustrations and `index.ts`, the single place every image is referenced |
+| `src/lib/` | Formatting, people helpers (initials, avatar colour, team parsing), `useProjectListParams`, `useDebouncedValue`, `useDocumentTitle`, `useNotifications` (inbox queries, mark-read mutations, `notificationLink`) |
+
+#### 2.7.3 Data flow
+
+- `src/api/client.ts` is the Axios instance. It adds the Bearer token from the stored session, clears the session and returns to `/login` on a 401, and turns any error into one readable sentence (`errorMessage`) or per-field messages (`fieldErrors`). The session is kept in `localStorage` when "Remember me" is ticked and in `sessionStorage` otherwise.
+- `src/api/endpoints.ts` has one function per endpoint and `src/api/types.ts` mirrors the backend DTOs. `listProjects` reads the `ProjectPageResponse` envelope and returns `{ items, total, page, size, totalPages }` (`content`, `totalElements` and the paging numbers).
+- Server state lives in TanStack Query. Keys start with `['projects']` for lists and counts, `['project', id]`, `['versions', id]`, `['reviews', id]`, `['history', id]` and `['compare', id, from, to]` for one project, and `['notifications', userId, ...]` for the inbox, where the user id keeps one account's inbox out of the next one's cache in the same tab. Every mutation invalidates the keys it affects, so lists, dashboards and the project page stay in step.
+- List filters (`status`, `q`, `reviewerId`, `admissionYear`, `branch`, `sort`, `page`) live in the URL through `useProjectListParams`, so a filtered list can be shared; the search and branch boxes update the URL after a 300 ms pause (the branch is upper-cased) and paging keeps the previous page on screen while the next one loads. The batch year and branch controls are shown to the coordinator only; the year offers this year and the five before it. The pager reads `page`, `size` and `totalElements` from the response envelope, and a page past the end (for example from an old link) moves to the last page.
+- The unread count and any inbox list on screen refetch every 30 seconds (`refetchInterval`, paused by TanStack Query while the tab is hidden); the dropdown only loads while open. Opening a notification marks it read and goes to its project. A `REVIEWER_UNASSIGNED` notification has no link because that reviewer can no longer open the project. The notifications page keeps its page number in the URL and moves to the last page if the number is past the end.
+- Buttons for workflow actions come only from `allowedActions` in `ProjectDetailResponse`. List rows, which carry no `allowedActions`, only offer shortcuts that the target page checks again (for example "Edit draft" for a DRAFT row opens the wizard, which shows "Nothing to edit" if the draft is gone).
+- `AssignReviewerPanel` also reassigns: given `reassignFrom` (the current reviewer) it leaves that person out of the list and calls `PUT /api/projects/{id}/assign`. `ProjectDetailPage` shows it only when `allowedActions` includes `REASSIGN_REVIEWER`, next to the message saying who the project is waiting for.
+- `DashboardPage` reads `GET /api/dashboard/summary` under the key `['projects', 'dashboard']`, so an assignment from its quick-assign dialog (the shared `AssignDialog`) or from anywhere else refreshes it. Each status count opens the project list filtered by that status, and each reviewer opens the list filtered by that reviewer and UNDER_REVIEW.
+
+#### 2.7.4 Wizard
+
+`ProjectWizardPage` writes a proposal in four steps: Basic Info, Problem and Objectives, Methodology and Outcomes, Timeline and Review. Next validates the current step; Save draft works at every step and creates the project on the first save (`POST /api/projects`), then updates the open draft (`PUT /api/projects/{id}/proposal`). Project details (title, description, tech stack, team) are read-only when editing because the API has no endpoint to change them. Submit opens a confirmation dialog, saves, then calls `POST /api/projects/{id}/submit`. For a project in REVISION_REQUESTED the same page shows a "Revision v{n}" banner and the reviewer's latest feedback in a collapsible side panel. Leaving with unsaved changes asks for confirmation (`useBlocker` and `beforeunload`).
+
+#### 2.7.5 States and accessibility
+
+Every data view has a loading skeleton, an empty state and an error with Retry; successful actions show a toast. Inputs are labelled, errors are announced (`role="alert"`, live regions for toasts and counters), menus, tabs, the stepper and dialogs are keyboard operable with visible focus, and animations respect `prefers-reduced-motion`. The layout is designed at 1440px and works down to 360px: the sidebar becomes a drawer and tables scroll sideways.
+
+## 3. Object-oriented design
+
+**Abstraction.** Callers depend on what something does, not how. `ProjectState` is a project status as a set of actions, and `WorkflowService` never asks which status it holds. `NotificationChannel` is "a way to deliver", so `NotificationDispatcher` does not know about inboxes or logs. `EmailPolicy` hides the institution's address rules from `AuthService` and `UserService`. `AuditRecorder` hides the table behind `AuditEventListener`.
+
+**Encapsulation.** Entities guard their own rules and have no public setters. `Project` changes only through `moveTo` and `assignReviewer`. `ProposalVersion.updateContent` and `ProposalVersion.submit` refuse a submitted version through a private check, so no caller can skip it. `AuditLog` has no mutators at all and is built through `AuditLog.Builder`. `Notification` exposes only `markRead`. `BaseEntity` keeps `id` and `createdAt` private and assigns them in its constructor.
+
+**Inheritance.** `User`, `Project`, `ProposalVersion`, `Review`, `AuditLog` and `Notification` extend `BaseEntity`, which gives them a UUID, a creation time, `isNew` and identity-based `equals`. `ValidationException`, `UnauthenticatedException`, `ForbiddenException`, `NotFoundException`, `ConflictException` and `IllegalTransitionException` extend `PrastavException`. Every state class inherits the "illegal" default methods of `ProjectState`, which is why `ApprovedState` and `RejectedState` declare no action at all.
+
+**Polymorphism.** The same call behaves differently by type, with no `if` on the status. `ProjectState.submit` freezes the draft and moves to SUBMITTED in `DraftState`, but returns to UNDER_REVIEW in `RevisionRequestedState`, and throws in every other state. `ReviewDecisionHandler.apply` runs a different transition per implementation. `NotificationChannel.deliver` stores, logs or retries depending on the object, and `RetryingNotificationChannel` can stand in for any channel. `GlobalExceptionHandler.handleBusiness` reads `PrastavException.getCode` whatever the subclass.
+
+## 4. SOLID mapping
+
+One named class per principle. The same reasoning applies across the codebase.
+
+| Principle | Class | How it applies |
 |---|---|---|
-| id | UUID | PK |
-| title | VARCHAR(200) | NOT NULL |
-| description | TEXT | NOT NULL |
-| tech_stack | VARCHAR(500) | |
-| team_members | TEXT | free text |
-| owner_id | UUID | NOT NULL, FK users; index |
-| reviewer_id | UUID | FK users, nullable; index |
-| status | VARCHAR(30) | NOT NULL, CHECK in the six statuses; index |
-| version | BIGINT | NOT NULL DEFAULT 0, optimistic lock |
-| created_at, updated_at | TIMESTAMPTZ | NOT NULL; `updated_at` indexed (`V2__project_list_indexes.sql`) for the default list order |
+| **S**ingle responsibility | `ProposalVersionFactory` | Its one job is creating versions and numbering them. Who may create one is `ProposalService`'s question, and persisting is `ProposalVersionRepository`'s |
+| **O**pen/closed | `NotificationDispatcher` | A new delivery route is a new `NotificationChannel` bean and a configuration entry. The dispatcher, the listener and the workflow do not change |
+| **L**iskov substitution | `RetryingNotificationChannel` | It honours the `NotificationChannel` contract (`name` and `deliver`, failure signalled by throwing), so the dispatcher treats it exactly like the channel it wraps. `TerminalStatesTest` checks the same property for `ProjectState` by calling states through the interface |
+| **I**nterface segregation | `AuditRecorder` | One method, `record`. `AuditEventListener` needs to append and nothing else, so it does not see a whole repository |
+| **D**ependency inversion | `AuthService` | It depends on the `EmailPolicy` interface and receives `PatternEmailPolicy` through its constructor, so the high-level registration rule does not depend on address parsing, and a test can pass any policy |
 
-### 9.3 `proposal_versions`
+## 5. Design patterns
 
-| Column | Type | Constraints |
+| Pattern | Where (exact classes) | Why it is used here |
 |---|---|---|
-| id | UUID | PK |
-| project_id | UUID | NOT NULL, FK projects |
-| version_number | INTEGER | NOT NULL, CHECK >= 1; UNIQUE (project_id, version_number) |
-| problem_statement, objectives, methodology, expected_outcome, timeline | TEXT | nullable while DRAFT; required to submit (checked in code) |
-| reference_link | VARCHAR(500) | optional |
-| state | VARCHAR(20) | NOT NULL, CHECK in (DRAFT, SUBMITTED) |
-| submitted_at | TIMESTAMPTZ | CHECK: set if and only if state = SUBMITTED |
-| created_by | UUID | NOT NULL, FK users |
-| created_at | TIMESTAMPTZ | NOT NULL |
+| State | `ProjectState`, `DraftState`, `SubmittedState`, `UnderReviewState`, `RevisionRequestedState`, `ApprovedState`, `RejectedState` | The transition table is the heart of the system. With one class per status there is no status `switch` to keep in step, an action is illegal unless a state allows it, and each state is tested alone with plain `new` |
+| Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewerReassignedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener`; `ProjectStatusChangedEvent`, `ReviewerReassignedEvent` and `ReviewRecordedEvent` also consumed by `NotificationListener` | The workflow only publishes facts and does not know who listens. Audit and notifications need different timing, in the transaction and after commit, which each listener declares for itself |
+| Strategy (review decisions) | `ReviewDecisionHandler`, `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`, looked up by `ReviewService` | Each decision triggers a different transition; a lookup by decision replaces a `switch` in the service |
+| Strategy (notification channels) | `NotificationChannel`, `InAppNotificationChannel`, `EmailNotificationChannel`, chosen by `NotificationDispatcher` from `prastav.notification.enabled-channels` | Delivery routes are chosen by configuration, and a new route is a new class |
+| Strategy (email policy) | `EmailPolicy`, `PatternEmailPolicy`, used by `AuthService`, `UserService` and `DemoDataSeeder` | Address rules differ per institution; the services must not know them |
+| Decorator | `RetryingNotificationChannel` wrapping every channel enabled in `NotificationDispatcher` | Retrying is added around any channel without changing it, and every channel is retried the same way. Because `NotificationService.create` flushes in its own transaction, a failing INSERT is one of those failures |
+| Factory | `ProjectStateFactory` (status to state, fails at startup if a status is missing or claimed twice), `ProposalVersionFactory` (v1, and vN+1 prefilled from vN) | Lookup and creation rules live in one place: version numbering cannot be bypassed, and callers never pick a state class |
+| Builder | `AuditLog.builder()` / `AuditLog.Builder` | An audit entry has six fields, several optional; named steps read better than a long constructor, and `build` checks the required ones |
+| Facade | `WorkflowService` | One small API over states, persistence and events, so every status change takes the same audited path in one transaction |
+| Singleton scope | Every `@Service` and `@Component`, such as `WorkflowService`, `ProjectStateFactory` and `DraftState`, uses Spring's default singleton scope; no class declares `@Scope` or a hand-written `getInstance` | One instance serves all requests, so these classes must hold no request data. The state classes have no fields at all, and the caller travels as an `Actor` parameter. The container owns the single instance, so tests can still use `new`. `RetryingNotificationChannel` is the exception: not a bean, `NotificationDispatcher` creates one per enabled channel at startup |
+| Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects`; `AuditSpecifications` (project, actor, action, date range) combined by `AuditQueryService.search` | One composable query for every list filter instead of a repository method per combination |
+| Repository | `UserRepository`, `ProjectRepository`, `ProposalVersionRepository`, `ReviewRepository`, `AuditLogRepository`, `NotificationRepository` | Persistence abstraction (Spring Data JPA) |
+| DTO + Mapper | `*Request`/`*Response` records, `UserMapper`, `ProjectMapper`, `DashboardMapper`, `ProposalMapper`, `ReviewMapper`, `AuditMapper`, `NotificationMapper` | Entities never leave the service layer as JSON |
+| Value object | `ProposalContent`, `Actor`, `NewProject` | Immutable records passed between layers |
 
-Extra integrity: partial unique index `ux_proposal_one_open_draft` on (project_id) WHERE state = 'DRAFT' (business rule 7); trigger `trg_proposal_versions_immutable` rejects UPDATE or DELETE of a row whose state is SUBMITTED (business rule 2).
+## 6. Sequence and activity diagrams
 
-### 9.4 `reviews`
+PlantUML sources are in `docs/uml/*.puml` (shared style `_style.iuml`), rendered PNGs in `docs/uml/png/` (PlantUML's built-in Smetana layout, set in `_style.iuml`, so no Graphviz is needed). Mermaid equivalents are in `docs/diagrams.md` with renders in `docs/uml/mermaid-png/`.
 
-| Column | Type | Constraints |
-|---|---|---|
-| id | UUID | PK |
-| project_id | UUID | NOT NULL, FK projects; index |
-| proposal_version_id | UUID | NOT NULL, FK proposal_versions |
-| reviewer_id | UUID | NOT NULL, FK users |
-| decision | VARCHAR(30) | NOT NULL, CHECK in (APPROVE, REQUEST_REVISION, REJECT) |
-| comments | TEXT | CHECK: non-blank unless decision = APPROVE (business rule 5) |
-| created_at | TIMESTAMPTZ | NOT NULL |
+| Diagram | File |
+|---|---|
+| Use cases | `01_use_case` |
+| Domain class diagram | `02_domain_class` |
+| Workflow State-pattern class diagram | `03_workflow_state_pattern` |
+| Project state diagram with guards | `04_project_state` |
+| Sequence: create + submit | `05_seq_create_submit` |
+| Sequence: assign + review + request revision | `06_seq_assign_review_revision` |
+| Sequence: resubmit + approve | `07_seq_resubmit_approve` |
+| Sequence: illegal transition rejected | `08_seq_illegal_transition` |
+| ER diagram | `10_er` |
+| Component / architecture | `11_component_architecture` |
+| Observer and Strategy (domain events, audit, review decisions) | `12_events_and_strategies` |
+| Sequence: notification dispatch | `09_seq_notification_dispatch` |
+| Notification channels (Strategy and Decorator) | `13_notification_classes` |
+| Auth view (EmailPolicy Strategy) | `14_auth_classes` |
+| Activity: submit, assign, review, revise or approve | `15_activity_workflow` |
 
-### 9.5 `audit_logs`
+### 6.1 Sequence: create and submit
 
-| Column | Type | Constraints |
-|---|---|---|
-| id | UUID | PK |
-| project_id | UUID | FK projects, nullable |
-| actor_id | UUID | NOT NULL, FK users |
-| action | VARCHAR(40) | NOT NULL (`AuditAction`) |
-| from_status, to_status | VARCHAR(30) | nullable |
-| details | TEXT | JSON text |
-| created_at | TIMESTAMPTZ | NOT NULL |
+![Create and submit](uml/png/05_seq_create_submit.png)
 
-Indexes: `idx_audit_logs_project` (project_id, created_at) for the project timeline and the `projectId` filter; `idx_audit_logs_actor` (actor_id, created_at) and `idx_audit_logs_action` (action, created_at) for those filters in newest-first order; `idx_audit_logs_created_at` (created_at) for the unfiltered log and the date range.
+### 6.2 Sequence: assign, review, request revision
 
-Trigger `trg_audit_logs_append_only` rejects UPDATE and DELETE.
+![Assign and review](uml/png/06_seq_assign_review_revision.png)
 
-### 9.6 `notifications`
+### 6.3 Sequence: resubmit and approve
 
-Created by `V4__notifications.sql`; `V5__notification_reviewer_unassigned.sql` replaces `notifications_type_check` to allow REVIEWER_UNASSIGNED.
+![Resubmit and approve](uml/png/07_seq_resubmit_approve.png)
 
-| Column | Type | Constraints |
-|---|---|---|
-| id | UUID | PK |
-| recipient_id | UUID | NOT NULL, FK users |
-| project_id | UUID | FK projects, nullable |
-| type | VARCHAR(30) | NOT NULL, CHECK `notifications_type_check` in (REVIEWER_ASSIGNED, REVIEWER_UNASSIGNED, REVIEW_DECISION, RESUBMITTED) |
-| message | VARCHAR(500) | NOT NULL |
-| is_read | BOOLEAN | NOT NULL, DEFAULT false |
-| created_at | TIMESTAMPTZ | NOT NULL |
+### 6.4 Sequence: illegal transition
 
-Indexes: `idx_notifications_recipient_read` (recipient_id, is_read) for the unread count and unread filter; `idx_notifications_recipient_created` (recipient_id, created_at) for the newest-first inbox.
+![Illegal transition](uml/png/08_seq_illegal_transition.png)
 
-### 9.7 Indexes
+### 6.5 Sequence: notification dispatch
 
-Every index in the schema besides the primary keys. Each one serves a column that a query filters, joins or orders on.
+![Notification dispatch](uml/png/09_seq_notification_dispatch.png)
 
-| Table | Index | Columns | Migration | Serves |
-|---|---|---|---|---|
-| users | `users_email_key` (from `UNIQUE`) | email | `V1__init.sql` | login and duplicate-email checks |
-| users | `idx_users_admission_year_branch` | (admission_year, branch) | `V3__user_institution_profile.sql` | cohort filters on students |
-| projects | `idx_projects_owner` | owner_id | `V1__init.sql` | student list scope, dashboard counts per owner, join to users |
-| projects | `idx_projects_reviewer` | reviewer_id | `V1__init.sql` | faculty list scope, `reviewerId` filter, counts per reviewer, join for the coordinator dashboard's reviewer workload |
-| projects | `idx_projects_status` | status | `V1__init.sql` | `status` filter, counts by status, the dashboard's awaiting-assignment list |
-| projects | `idx_projects_updated_at` | updated_at | `V2__project_list_indexes.sql` | default list order (LATEST, OLDEST) |
-| proposal_versions | `uq_proposal_project_version` (constraint) | (project_id, version_number) | `V1__init.sql` | sequential version numbers; versions of one project |
-| proposal_versions | `ux_proposal_one_open_draft` (partial, unique) | project_id WHERE state = 'DRAFT' | `V1__init.sql` | business rule 7: one open draft per project |
-| reviews | `idx_reviews_project` | project_id | `V1__init.sql` | review history of a project |
-| audit_logs | `idx_audit_logs_project` | (project_id, created_at) | `V1__init.sql` | project timeline in time order, `projectId` filter of the audit log |
-| audit_logs | `idx_audit_logs_actor` | (actor_id, created_at) | `V6__audit_query_indexes.sql` | `actorId` filter of the audit log, newest first |
-| audit_logs | `idx_audit_logs_action` | (action, created_at) | `V6__audit_query_indexes.sql` | `action` filter of the audit log, newest first |
-| audit_logs | `idx_audit_logs_created_at` | created_at | `V6__audit_query_indexes.sql` | unfiltered audit log order, `from` and `to` range |
-| notifications | `idx_notifications_recipient_read` | (recipient_id, is_read) | `V4__notifications.sql` | unread count and unread filter |
-| notifications | `idx_notifications_recipient_created` | (recipient_id, created_at) | `V4__notifications.sql` | newest-first inbox |
+### 6.6 Activity: submit, assign, review, revise or approve
 
-## 10. REST API contracts
+![Activity](uml/png/15_activity_workflow.png)
 
-Base path `/api`. All endpoints except register, login and Swagger need `Authorization: Bearer <jwt>`. Timestamps are ISO-8601 UTC strings. Errors always use the `ApiError` body (section 11).
+## 7. REST API contracts
+
+Base path `/api`. All endpoints except register, login and Swagger need `Authorization: Bearer <jwt>`. Timestamps are ISO-8601 UTC strings. Errors always use the `ApiError` body (section 9).
 
 | Method | Path | Role | Purpose | Success |
 |---|---|---|---|---|
@@ -2414,29 +2497,51 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 | GET | /users?role=FACULTY | COORDINATOR | List users (reviewer picker) | 200 `UserResponse[]` |
 | POST | /users | COORDINATOR | Create a FACULTY or COORDINATOR account | 201 `UserResponse` |
 | POST | /projects | STUDENT | Create project + draft v1 | 201 `ProjectDetailResponse` |
-| GET | /projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size= | any | Role-scoped, paged list with optional filters, search and sort (section 10.7) | 200 `ProjectPageResponse` |
+| GET | /projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size= | any | Role-scoped, paged list with optional filters, search and sort (section 7.7) | 200 `ProjectPageResponse` |
 | GET | /projects/summary | any | Role-scoped counts by status for the dashboards | 200 `ProjectCountsResponse` |
-| GET | /dashboard/summary | COORDINATOR | Counts by status, projects awaiting assignment, reviewer workload (section 10.9) | 200 `DashboardSummaryResponse` |
-| GET | /audit?projectId=&actorId=&action=&from=&to=&page=&size= | COORDINATOR | Paged audit log, newest first, with optional filters (section 10.10) | 200 `AuditPageResponse` |
+| GET | /dashboard/summary | COORDINATOR | Counts by status, projects awaiting assignment, reviewer workload (section 7.9) | 200 `DashboardSummaryResponse` |
+| GET | /audit?projectId=&actorId=&action=&from=&to=&page=&size= | COORDINATOR | Paged audit log, newest first, with optional filters (section 7.10) | 200 `AuditPageResponse` |
 | GET | /projects/{id} | participant | Detail with `allowedActions` | 200 `ProjectDetailResponse` |
 | PUT | /projects/{id}/proposal | STUDENT owner | Edit open draft | 200 `ProposalVersionResponse` |
 | POST | /projects/{id}/proposals | STUDENT owner | Create next version (REVISION_REQUESTED only) | 201 `ProposalVersionResponse` |
 | GET | /projects/{id}/proposals | participant | All versions | 200 `ProposalVersionResponse[]` |
-| GET | /projects/{id}/proposals/compare?from=&to= | participant | Field-by-field comparison of two versions (section 10.3) | 200 `ProposalDiff` |
+| GET | /projects/{id}/proposals/compare?from=&to= | participant | Field-by-field comparison of two versions (section 7.3) | 200 `ProposalDiff` |
 | POST | /projects/{id}/submit | STUDENT owner | Submit or resubmit | 200 `ProjectDetailResponse` |
 | POST | /projects/{id}/assign | COORDINATOR | Assign reviewer (SUBMITTED) | 200 `ProjectDetailResponse` |
-| PUT | /projects/{id}/assign | COORDINATOR | Reassign reviewer (UNDER_REVIEW only, section 10.4) | 200 `ProjectDetailResponse` |
+| PUT | /projects/{id}/assign | COORDINATOR | Reassign reviewer (UNDER_REVIEW only, section 7.4) | 200 `ProjectDetailResponse` |
 | POST | /projects/{id}/reviews | FACULTY assigned | Record decision | 201 `ReviewResponse` |
 | GET | /projects/{id}/reviews | participant | Review history | 200 `ReviewResponse[]` |
 | GET | /projects/{id}/history | participant | Merged timeline | 200 `TimelineEntry[]` |
-| GET | /notifications?unread=&page=&size= | any (own) | The caller's notifications, newest first, paged (section 10.8) | 200 `NotificationPageResponse` |
+| GET | /notifications?unread=&page=&size= | any (own) | The caller's notifications, newest first, paged (section 7.8) | 200 `NotificationPageResponse` |
 | GET | /notifications/unread-count | any (own) | Number of unread notifications | 200 `UnreadCountResponse` |
 | PATCH | /notifications/{id}/read | recipient | Mark one notification read | 200 `NotificationResponse` |
 | PATCH | /notifications/read-all | any (own) | Mark every unread notification read | 200 `MarkAllReadResponse` |
 
-"Participant" means the owner, the assigned reviewer or any coordinator (`ProjectAccessPolicy.canView`).
+"Participant" means the owner, the assigned reviewer or any coordinator (`ProjectAccessPolicy.canView`). The tables below list the errors specific to each endpoint. These apply to every endpoint:
 
-### 10.1 Auth
+| Case | Response |
+|---|---|
+| Missing, invalid or expired token (all but register and login) | 401 `UNAUTHENTICATED` "Authentication required: send a valid Bearer token" |
+| Role not allowed by `@PreAuthorize` | 403 `FORBIDDEN` "Your role is not allowed to perform this action" |
+| Malformed UUID, enum, number, date or JSON | 400 `VALIDATION_FAILED` "Malformed request: check the JSON body, path and parameters" |
+| Unknown project id | 404 `NOT_FOUND` "Project 0b8f... not found" |
+
+Every error has this body:
+
+```json
+{ "timestamp": "2026-10-19T09:45:00.120Z", "status": 401, "code": "UNAUTHENTICATED",
+  "message": "Authentication required: send a valid Bearer token", "path": "/api/auth/me", "fieldErrors": [] }
+```
+
+`fieldErrors` is filled when a request body fails Bean Validation:
+
+```json
+{ "timestamp": "2026-10-19T09:45:00.120Z", "status": 400, "code": "VALIDATION_FAILED", "message": "Request validation failed",
+  "path": "/api/auth/register",
+  "fieldErrors": [ { "field": "password", "message": "size must be between 8 and 72" } ] }
+```
+
+### 7.1 Auth
 
 `POST /api/auth/register`
 
@@ -2456,6 +2561,30 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 
 Rules: `role` is optional and only STUDENT is accepted; the email must be on `prastav.institution.email-domain` and match `prastav.institution.student-email-pattern` (`<firstname>.<YY><branch>`), compared case-insensitively and stored lower-case. A faculty-style email, another domain, another role or a duplicate email returns 400 VALIDATION_FAILED, including when two registrations race for one email; wrong credentials on login return 401 UNAUTHENTICATED with "Invalid email or password".
 
+`POST /api/auth/login`
+
+```json
+{ "email": "aarav.23csai@nst.rishihood.edu.in", "password": "Password@123" }
+```
+
+`200 OK` with the same `AuthResponse` as register. A blank field returns 400 `VALIDATION_FAILED`; a wrong email or password returns 401 `UNAUTHENTICATED` "Invalid email or password".
+
+`GET /api/auth/me` returns the caller's `UserResponse`:
+
+```json
+{ "id": "7f1c2a9e-3b0d-4c1e-9a55-1d2e3f4a5b6c", "name": "Aarav Mehta", "email": "aarav.23csai@nst.rishihood.edu.in",
+  "role": "STUDENT", "admissionYear": 2023, "branch": "CSAI" }
+```
+
+`GET /api/users?role=FACULTY` (COORDINATOR) returns `UserResponse[]`. `role` is optional; without it every account is listed. An unknown role returns 400 `VALIDATION_FAILED`.
+
+```json
+[
+  { "id": "a1b2c3d4-1111-4a2b-8c3d-4e5f6a7b8c9d", "name": "Dr. Anita Rao", "email": "anita.rao@nst.rishihood.edu.in",
+    "role": "FACULTY", "admissionYear": null, "branch": null }
+]
+```
+
 `POST /api/users` (COORDINATOR)
 
 ```json
@@ -2464,7 +2593,7 @@ Rules: `role` is optional and only STUDENT is accepted; the email must be on `pr
 
 `201 Created` with `UserResponse` (`admissionYear` and `branch` null). Only the institutional domain is checked, not the student pattern. STUDENT, another domain or a duplicate email, including one lost to a race, returns 400 VALIDATION_FAILED; any other caller role returns 403 FORBIDDEN.
 
-### 10.2 Create project
+### 7.2 Create and read a project
 
 `POST /api/projects` (STUDENT)
 
@@ -2521,13 +2650,58 @@ Rules: `role` is optional and only STUDENT is accepted; the email must be on `pr
 
 `allowedActions` is computed for the caller: the same project fetched by the coordinator returns `[]` while DRAFT and `["ASSIGN_REVIEWER"]` once SUBMITTED.
 
-### 10.3 Edit draft and versions
+`proposal` is optional and any of its fields may be null or blank, because a draft may be incomplete. A blank `title` or `description`, or a value over its length limit, returns 400 `VALIDATION_FAILED` with `fieldErrors`; a faculty or coordinator caller gets 403 `FORBIDDEN`.
 
-`PUT /api/projects/{id}/proposal` with a full `ProposalContent` body (same six fields as above) returns `ProposalVersionResponse`. In SUBMITTED or UNDER_REVIEW it returns 409 `ILLEGAL_TRANSITION` "Action EDIT_DRAFT is not allowed while the project is SUBMITTED". In REVISION_REQUESTED before a new version exists it returns 409 "There is no open draft; create a new version first".
+`GET /api/projects/{id}` (participant) returns the same `ProjectDetailResponse`. A caller who is not a participant gets 403 `FORBIDDEN` "You are not a participant of this project".
 
-`POST /api/projects/{id}/proposals` (no body) returns `201` with version N+1 in state DRAFT, prefilled from version N. A second call while that draft is open returns 409 "Version 2 is already an open draft". When two calls overlap and both pass that check, the second returns 409 `CONCURRENT_UPDATE` and only one version is created.
+### 7.3 Edit draft and versions
 
-`GET /api/projects/{id}/proposals` returns all versions oldest first; submitted versions have `"state": "SUBMITTED"` and a `submittedAt`.
+`PUT /api/projects/{id}/proposal` (student owner) replaces the open draft:
+
+```json
+{
+  "problemStatement": "Attendance is taken on paper and takes ten minutes per lecture.",
+  "objectives": "Automate attendance using face recognition.",
+  "methodology": "A camera at the door and a Spring Boot service.",
+  "expectedOutcome": "Attendance recorded with no manual step.",
+  "timeline": "8 weeks",
+  "referenceLink": null
+}
+```
+
+`200 OK`, `ProposalVersionResponse`:
+
+```json
+{
+  "id": "c3d4e5f6-0000-4a1b-9c2d-3e4f5a6b7c8d",
+  "versionNumber": 1,
+  "state": "DRAFT",
+  "problemStatement": "Attendance is taken on paper and takes ten minutes per lecture.",
+  "objectives": "Automate attendance using face recognition.",
+  "methodology": "A camera at the door and a Spring Boot service.",
+  "expectedOutcome": "Attendance recorded with no manual step.",
+  "timeline": "8 weeks",
+  "referenceLink": null,
+  "missingFields": [],
+  "submittedAt": null,
+  "createdAt": "2026-10-19T09:00:00.120Z"
+}
+```
+
+Another user gets 403 `FORBIDDEN` "Only the project owner can do this". A field over its length limit returns 400 `VALIDATION_FAILED` with `fieldErrors`. In SUBMITTED or UNDER_REVIEW it returns 409 `ILLEGAL_TRANSITION` "Action EDIT_DRAFT is not allowed while the project is SUBMITTED". In REVISION_REQUESTED before a new version exists it returns 409 "There is no open draft; create a new version first".
+
+`POST /api/projects/{id}/proposals` (student owner, no body) returns `201` with a `ProposalVersionResponse` for version N+1 in state DRAFT, prefilled from version N. Outside REVISION_REQUESTED it returns 409 `ILLEGAL_TRANSITION` "Action CREATE_REVISION is not allowed while the project is SUBMITTED"; another user gets 403 `FORBIDDEN`. A second call while that draft is open returns 409 "Version 2 is already an open draft". When two calls overlap and both pass that check, the second returns 409 `CONCURRENT_UPDATE` and only one version is created.
+
+`GET /api/projects/{id}/proposals` (participant) returns all versions oldest first; submitted versions have `"state": "SUBMITTED"` and a `submittedAt`:
+
+```json
+[
+  { "id": "c3d4e5f6-0000-4a1b-9c2d-3e4f5a6b7c8d", "versionNumber": 1, "state": "SUBMITTED",
+    "problemStatement": "Attendance is taken on paper.", "objectives": "Automate attendance.", "methodology": "A camera at the door.",
+    "expectedOutcome": "No manual step.", "timeline": "8 weeks", "referenceLink": null, "missingFields": [],
+    "submittedAt": "2026-10-19T09:20:31.004Z", "createdAt": "2026-10-19T09:00:00.120Z" }
+]
+```
 
 `GET /api/projects/{id}/proposals/compare?from=1&to=2` (any participant: the owner, the assigned faculty, the coordinator) returns every proposal field in form order, with its value in each version and whether it changed:
 
@@ -2548,9 +2722,9 @@ Rules: `role` is optional and only STUDENT is accepted; the email must be on `pr
 
 `from` may be greater than `to`; the sides are reported as given. Either version may be a draft. A version number that does not exist in this project returns 404 `NOT_FOUND` ("Proposal version 7 not found"); `from` equal to `to` returns 400 `VALIDATION_FAILED` ("from and to must be different versions"); a missing or non-numeric `from` or `to` returns 400 `VALIDATION_FAILED`; a caller who is not a participant gets 403 `FORBIDDEN`. Access is checked before anything else.
 
-### 10.4 Submit and assign
+### 7.4 Submit and assign
 
-`POST /api/projects/{id}/submit` (no body) returns the updated `ProjectDetailResponse` (`"status": "SUBMITTED"` from DRAFT, or `"UNDER_REVIEW"` from REVISION_REQUESTED). An incomplete draft returns:
+`POST /api/projects/{id}/submit` (student owner, no body) returns the updated `ProjectDetailResponse` (section 7.2), with `"status": "SUBMITTED"` from DRAFT or `"UNDER_REVIEW"` from REVISION_REQUESTED, and the reviewer kept. Another user gets 403 `FORBIDDEN` "Only the project owner can do this"; a second submit returns 409 `ILLEGAL_TRANSITION` "Action SUBMIT is not allowed while the project is SUBMITTED"; a submit that loses a race returns 409 `CONCURRENT_UPDATE` (section 11). An incomplete draft returns:
 
 ```json
 {
@@ -2569,7 +2743,15 @@ Rules: `role` is optional and only STUDENT is accepted; the email must be on `pr
 { "facultyId": "a1b2c3d4-1111-4a2b-8c3d-4e5f6a7b8c9d" }
 ```
 
-returns `ProjectDetailResponse` with `"status": "UNDER_REVIEW"` and `"reviewer": { "id": "a1b2c3d4-...", "name": "Dr. Anita Rao" }`. A non-faculty `facultyId` returns 400 "Reviewer must have the FACULTY role".
+returns `ProjectDetailResponse` with `"status": "UNDER_REVIEW"` and `"reviewer": { "id": "a1b2c3d4-...", "name": "Dr. Anita Rao" }`. A non-faculty `facultyId` returns 400 "Reviewer must have the FACULTY role". Errors:
+
+| Case | Response |
+|---|---|
+| Student or faculty caller | 403 `FORBIDDEN` "Your role is not allowed to perform this action" |
+| Missing `facultyId` | 400 `VALIDATION_FAILED` with `fieldErrors: [{ "field": "facultyId", ... }]` |
+| Unknown project or user | 404 `NOT_FOUND` |
+| Project not SUBMITTED | 409 `ILLEGAL_TRANSITION` "Action ASSIGN_REVIEWER is not allowed while the project is UNDER_REVIEW" |
+| Concurrent change to the project | 409 `CONCURRENT_UPDATE` |
 
 `PUT /api/projects/{id}/assign` (COORDINATOR) reassigns the reviewer of a project that is UNDER_REVIEW. The body is the same `AssignReviewerRequest`:
 
@@ -2586,7 +2768,7 @@ It returns `ProjectDetailResponse` with the status unchanged and the new reviewe
   "allowedActions": ["REASSIGN_REVIEWER"], "...": "other ProjectDetailResponse fields" }
 ```
 
-The audit log gets `REVIEWER_REASSIGNED` with `{"previousReviewerId":"a1b2c3d4-...","reviewerId":"e5f6a7b8-..."}`. The previous reviewer receives `REVIEWER_UNASSIGNED` and the new one `REVIEWER_ASSIGNED` (section 6.1). Errors:
+The audit log gets `REVIEWER_REASSIGNED` with `{"previousReviewerId":"a1b2c3d4-...","reviewerId":"e5f6a7b8-..."}`. The previous reviewer receives `REVIEWER_UNASSIGNED` and the new one `REVIEWER_ASSIGNED` (section 2.4.1). Errors:
 
 | Case | Response |
 |---|---|
@@ -2598,7 +2780,7 @@ The audit log gets `REVIEWER_REASSIGNED` with `{"previousReviewerId":"a1b2c3d4-.
 | Project not UNDER_REVIEW | 409 `ILLEGAL_TRANSITION` "Action REASSIGN_REVIEWER is not allowed while the project is SUBMITTED" |
 | Concurrent change to the project | 409 `CONCURRENT_UPDATE` |
 
-### 10.5 Reviews
+### 7.5 Reviews
 
 `POST /api/projects/{id}/reviews` (assigned FACULTY)
 
@@ -2619,7 +2801,7 @@ The audit log gets `REVIEWER_REASSIGNED` with `{"previousReviewerId":"a1b2c3d4-.
 }
 ```
 
-`versionNumber` is optional; if sent and not the latest submitted version: 409 "Only the latest submitted version (v2) can be reviewed". Missing comments for REQUEST_REVISION or REJECT: 400 "Comments are mandatory for REQUEST_REVISION". An unassigned faculty member: 403 "Only the assigned reviewer can review this project". Approving a SUBMITTED project:
+`comments` is optional for APPROVE. `versionNumber` is optional; if sent and not the latest submitted version: 409 "Only the latest submitted version (v2) can be reviewed". A missing or unknown `decision`: 400 `VALIDATION_FAILED`. A student or coordinator caller: 403 "Your role is not allowed to perform this action". Missing comments for REQUEST_REVISION or REJECT: 400 "Comments are mandatory for REQUEST_REVISION". An unassigned faculty member: 403 "Only the assigned reviewer can review this project". Approving a SUBMITTED project:
 
 ```json
 {
@@ -2632,7 +2814,20 @@ The audit log gets `REVIEWER_REASSIGNED` with `{"previousReviewerId":"a1b2c3d4-.
 }
 ```
 
-### 10.6 History
+`GET /api/projects/{id}/reviews` (participant) returns `ReviewResponse[]`, oldest first:
+
+```json
+[
+  { "id": "e9f8a7b6-2222-4c3d-8e4f-5a6b7c8d9e0f", "versionNumber": 1, "decision": "REQUEST_REVISION",
+    "comments": "Explain how student consent and data retention are handled.",
+    "reviewer": { "id": "a1b2c3d4-1111-4a2b-8c3d-4e5f6a7b8c9d", "name": "Dr. Anita Rao" },
+    "createdAt": "2026-10-19T10:12:40.017Z" }
+]
+```
+
+A caller who is not a participant gets 403 `FORBIDDEN`.
+
+### 7.6 History
 
 `GET /api/projects/{id}/history` returns `TimelineEntry[]` sorted by time:
 
@@ -2647,7 +2842,9 @@ The audit log gets `REVIEWER_REASSIGNED` with `{"previousReviewerId":"a1b2c3d4-.
 ]
 ```
 
-### 10.7 Project list and summary
+A caller who is not a participant gets 403 `FORBIDDEN` "You are not a participant of this project"; an unknown project is 404 `NOT_FOUND`.
+
+### 7.7 Project list and summary
 
 `GET /api/projects` returns one page of the caller's projects: a student sees own projects, faculty the projects assigned to them, the coordinator every project (`ProjectSpecifications.visibleTo`). Every parameter is optional, and filters combine with AND inside that scope. Filtering, ordering and paging all run in the database query (`ProjectRepository.findAll(Specification, Pageable)`).
 
@@ -2687,9 +2884,11 @@ An unknown `status` or `sort`, a malformed `reviewerId`, a non-numeric or negati
 { "total": 8, "byStatus": { "DRAFT": 1, "SUBMITTED": 2, "UNDER_REVIEW": 2, "REVISION_REQUESTED": 1, "APPROVED": 1, "REJECTED": 1 }, "awaitingAssignment": 2 }
 ```
 
-### 10.8 Notifications
+For a student or faculty member `awaitingAssignment` is null. The only endpoint-specific error is the 401 for a missing token.
 
-Every role has an inbox, and every endpoint works only on the caller's own notifications: the recipient is always the `Actor` from the token, never a parameter. Notifications are created by `NotificationListener` (section 6.1), not through the API.
+### 7.8 Notifications
+
+Every role has an inbox, and every endpoint works only on the caller's own notifications: the recipient is always the `Actor` from the token, never a parameter. Notifications are created by `NotificationListener` (section 2.4.1), not through the API.
 
 `GET /api/notifications?unread=true&page=0&size=10`
 
@@ -2740,7 +2939,7 @@ A negative `page` or a `size` outside 1 to 50 returns 400 `VALIDATION_FAILED` ("
 
 Without a token every notification endpoint returns 401 `UNAUTHENTICATED`.
 
-### 10.9 Coordinator dashboard
+### 7.9 Coordinator dashboard
 
 `GET /api/dashboard/summary` is for the coordinator only: a student or faculty member gets 403 `FORBIDDEN` and a call without a token 401 `UNAUTHENTICATED`. Everything is computed in the database with grouped queries; no project list is loaded to be counted. The code lives in the `project` module (`DashboardService`, `project.web.DashboardController`) because it reads `ProjectRepository`, and a repository is used only inside its own module; the URL is still `/api/dashboard/summary`.
 
@@ -2765,7 +2964,7 @@ Without a token every notification endpoint returns 401 `UNAUTHENTICATED`.
 }
 ```
 
-### 10.10 Audit log
+### 7.10 Audit log
 
 `GET /api/audit` is for the coordinator only: a student or faculty member gets 403 `FORBIDDEN` and a call without a token 401 `UNAUTHENTICATED`. The role is checked on the controller and again in `AuditQueryService.search`. Entries are ordered newest first, with the id as a tie-break so paging stays stable.
 
@@ -2807,9 +3006,147 @@ Errors: a malformed UUID, unknown `action`, unparseable `from` or `to`, negative
   "message": "from must not be after to", "path": "/api/audit", "fieldErrors": [] }
 ```
 
-## 11. Error handling, validation and concurrency
+## 8. Database schema
 
-### 11.1 Error handling
+Owned by Flyway (`V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`, `V5__notification_reviewer_unassigned.sql`, `V6__audit_query_indexes.sql`). Flyway also keeps its own `flyway_schema_history` table, which is not part of the design and is not drawn.; Hibernate runs with `ddl-auto: none`. All ids are application-generated UUIDs; all timestamps are `TIMESTAMPTZ` stored in UTC.
+
+![ER diagram](uml/png/10_er.png)
+
+### 8.1 `users`
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| name | VARCHAR(120) | NOT NULL |
+| email | VARCHAR(255) | NOT NULL, UNIQUE (stored lower-case) |
+| password_hash | VARCHAR(100) | NOT NULL (BCrypt) |
+| role | VARCHAR(20) | NOT NULL, CHECK in (STUDENT, FACULTY, COORDINATOR) |
+| admission_year | INTEGER | nullable; 2000 + YY from a student email |
+| branch | VARCHAR(20) | nullable; upper-case branch from a student email, e.g. CSAI |
+| created_at | TIMESTAMPTZ | NOT NULL |
+
+Index `idx_users_admission_year_branch` on (admission_year, branch) for cohort filters. Staff rows leave both columns null.
+
+### 8.2 `projects`
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| title | VARCHAR(200) | NOT NULL |
+| description | TEXT | NOT NULL |
+| tech_stack | VARCHAR(500) | |
+| team_members | TEXT | free text |
+| owner_id | UUID | NOT NULL, FK users; index |
+| reviewer_id | UUID | FK users, nullable; index |
+| status | VARCHAR(30) | NOT NULL, CHECK in the six statuses; index |
+| version | BIGINT | NOT NULL DEFAULT 0, optimistic lock |
+| created_at, updated_at | TIMESTAMPTZ | NOT NULL; `updated_at` indexed (`V2__project_list_indexes.sql`) for the default list order |
+
+### 8.3 `proposal_versions`
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| project_id | UUID | NOT NULL, FK projects |
+| version_number | INTEGER | NOT NULL, CHECK >= 1; UNIQUE (project_id, version_number) |
+| problem_statement, objectives, methodology, expected_outcome, timeline | TEXT | nullable while DRAFT; required to submit (checked in code) |
+| reference_link | VARCHAR(500) | optional |
+| state | VARCHAR(20) | NOT NULL, CHECK in (DRAFT, SUBMITTED) |
+| submitted_at | TIMESTAMPTZ | CHECK: set if and only if state = SUBMITTED |
+| created_by | UUID | NOT NULL, FK users |
+| created_at | TIMESTAMPTZ | NOT NULL |
+
+Extra integrity: partial unique index `ux_proposal_one_open_draft` on (project_id) WHERE state = 'DRAFT' (business rule 7); trigger `trg_proposal_versions_immutable` rejects UPDATE or DELETE of a row whose state is SUBMITTED (business rule 2).
+
+### 8.4 `reviews`
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| project_id | UUID | NOT NULL, FK projects; index |
+| proposal_version_id | UUID | NOT NULL, FK proposal_versions |
+| reviewer_id | UUID | NOT NULL, FK users |
+| decision | VARCHAR(30) | NOT NULL, CHECK in (APPROVE, REQUEST_REVISION, REJECT) |
+| comments | TEXT | CHECK: non-blank unless decision = APPROVE (business rule 5) |
+| created_at | TIMESTAMPTZ | NOT NULL |
+
+### 8.5 `audit_logs`
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| project_id | UUID | FK projects, nullable |
+| actor_id | UUID | NOT NULL, FK users |
+| action | VARCHAR(40) | NOT NULL (`AuditAction`) |
+| from_status, to_status | VARCHAR(30) | nullable |
+| details | TEXT | JSON text |
+| created_at | TIMESTAMPTZ | NOT NULL |
+
+Indexes: `idx_audit_logs_project` (project_id, created_at) for the project timeline and the `projectId` filter; `idx_audit_logs_actor` (actor_id, created_at) and `idx_audit_logs_action` (action, created_at) for those filters in newest-first order; `idx_audit_logs_created_at` (created_at) for the unfiltered log and the date range.
+
+Trigger `trg_audit_logs_append_only` rejects UPDATE and DELETE.
+
+### 8.6 `notifications`
+
+Created by `V4__notifications.sql`; `V5__notification_reviewer_unassigned.sql` replaces `notifications_type_check` to allow REVIEWER_UNASSIGNED.
+
+| Column | Type | Constraints |
+|---|---|---|
+| id | UUID | PK |
+| recipient_id | UUID | NOT NULL, FK users |
+| project_id | UUID | FK projects, nullable |
+| type | VARCHAR(30) | NOT NULL, CHECK `notifications_type_check` in (REVIEWER_ASSIGNED, REVIEWER_UNASSIGNED, REVIEW_DECISION, RESUBMITTED) |
+| message | VARCHAR(500) | NOT NULL |
+| is_read | BOOLEAN | NOT NULL, DEFAULT false |
+| created_at | TIMESTAMPTZ | NOT NULL |
+
+Indexes: `idx_notifications_recipient_read` (recipient_id, is_read) for the unread count and unread filter; `idx_notifications_recipient_created` (recipient_id, created_at) for the newest-first inbox.
+
+### 8.7 Indexes
+
+Every index in the schema besides the primary keys. Each one serves a column that a query filters, joins or orders on.
+
+| Table | Index | Columns | Migration | Serves |
+|---|---|---|---|---|
+| users | `users_email_key` (from `UNIQUE`) | email | `V1__init.sql` | login and duplicate-email checks |
+| users | `idx_users_admission_year_branch` | (admission_year, branch) | `V3__user_institution_profile.sql` | cohort filters on students |
+| projects | `idx_projects_owner` | owner_id | `V1__init.sql` | student list scope, dashboard counts per owner, join to users |
+| projects | `idx_projects_reviewer` | reviewer_id | `V1__init.sql` | faculty list scope, `reviewerId` filter, counts per reviewer, join for the coordinator dashboard's reviewer workload |
+| projects | `idx_projects_status` | status | `V1__init.sql` | `status` filter, counts by status, the dashboard's awaiting-assignment list |
+| projects | `idx_projects_updated_at` | updated_at | `V2__project_list_indexes.sql` | default list order (LATEST, OLDEST) |
+| proposal_versions | `uq_proposal_project_version` (constraint) | (project_id, version_number) | `V1__init.sql` | sequential version numbers; versions of one project |
+| proposal_versions | `ux_proposal_one_open_draft` (partial, unique) | project_id WHERE state = 'DRAFT' | `V1__init.sql` | business rule 7: one open draft per project |
+| reviews | `idx_reviews_project` | project_id | `V1__init.sql` | review history of a project |
+| audit_logs | `idx_audit_logs_project` | (project_id, created_at) | `V1__init.sql` | project timeline in time order, `projectId` filter of the audit log |
+| audit_logs | `idx_audit_logs_actor` | (actor_id, created_at) | `V6__audit_query_indexes.sql` | `actorId` filter of the audit log, newest first |
+| audit_logs | `idx_audit_logs_action` | (action, created_at) | `V6__audit_query_indexes.sql` | `action` filter of the audit log, newest first |
+| audit_logs | `idx_audit_logs_created_at` | created_at | `V6__audit_query_indexes.sql` | unfiltered audit log order, `from` and `to` range |
+| notifications | `idx_notifications_recipient_read` | (recipient_id, is_read) | `V4__notifications.sql` | unread count and unread filter |
+| notifications | `idx_notifications_recipient_created` | (recipient_id, created_at) | `V4__notifications.sql` | newest-first inbox |
+
+### 8.8 Keys and relationships
+
+Every table has a UUID primary key named `<table>_pkey`: `users_pkey`, `projects_pkey`, `proposal_versions_pkey`, `reviews_pkey`, `audit_logs_pkey`, `notifications_pkey`. Ids are assigned by the application (`BaseEntity`).
+
+| Foreign key | Column | References | Cardinality |
+|---|---|---|---|
+| `projects_owner_id_fkey` | `projects.owner_id` | `users.id` | one user owns many projects; required |
+| `projects_reviewer_id_fkey` | `projects.reviewer_id` | `users.id` | one user reviews many projects; nullable |
+| `proposal_versions_project_id_fkey` | `proposal_versions.project_id` | `projects.id` | one project has one or more versions; required |
+| `proposal_versions_created_by_fkey` | `proposal_versions.created_by` | `users.id` | one user creates many versions; required |
+| `reviews_project_id_fkey` | `reviews.project_id` | `projects.id` | one project has many reviews; required |
+| `reviews_proposal_version_id_fkey` | `reviews.proposal_version_id` | `proposal_versions.id` | one version has many reviews; required |
+| `reviews_reviewer_id_fkey` | `reviews.reviewer_id` | `users.id` | one user writes many reviews; required |
+| `audit_logs_project_id_fkey` | `audit_logs.project_id` | `projects.id` | one project has many entries; nullable |
+| `audit_logs_actor_id_fkey` | `audit_logs.actor_id` | `users.id` | one user acts in many entries; required |
+| `notifications_recipient_id_fkey` | `notifications.recipient_id` | `users.id` | one user receives many notifications; required |
+| `notifications_project_id_fkey` | `notifications.project_id` | `projects.id` | one project has many notifications; nullable |
+
+Named CHECK constraints: `users_role_check`, `projects_status_check`, `proposal_versions_version_number_check`, `proposal_versions_state_check`, `ck_proposal_submitted_at`, `reviews_decision_check`, `ck_review_comments`, `notifications_type_check`. Unique constraints: `users_email_key`, `uq_proposal_project_version`. Triggers: `trg_proposal_versions_immutable`, `trg_audit_logs_append_only`.
+
+## 9. Error handling
+
+### 9.1 Error handling
 
 Controllers contain no `try`/`catch`. Services and domain classes throw, and every failure ends in `GlobalExceptionHandler` (`@RestControllerAdvice`), which writes the one `ApiError` body: `{ timestamp, status, code, message, path, fieldErrors[] }` with `fieldErrors` items `{ field, message }`. Stack traces are logged, never returned.
 
@@ -2836,7 +3173,7 @@ An exception in a `@Transactional` service rolls the transaction back, and the a
 
 `handleIntegrityViolation` covers a request that passed its checks and then lost a race to a unique index. It chooses its answer from the constraint name, and that name, the SQL and the driver's message stay in the log, never in the response.
 
-### 11.2 Error codes
+### 9.2 Error codes
 
 | Code | HTTP | Raised by | Example |
 |---|---|---|---|
@@ -2848,7 +3185,7 @@ An exception in a `@Transactional` service rolls the transaction back, and the a
 | CONCURRENT_UPDATE | 409 | `OptimisticLockingFailureException` on `Project.version`; `DataIntegrityViolationException` from `uq_proposal_project_version` or `ux_proposal_one_open_draft`; any other `DataIntegrityViolationException` ("The request conflicts with a change made at the same time. Reload and try again.") | "The project was changed by someone else at the same time. Reload and try again." |
 | INTERNAL_ERROR | 500 | anything unexpected (logged with stack trace, never returned) | "Unexpected server error" |
 
-### 11.3 Validation rules
+## 10. Validation rules
 
 Validation runs in layers, from the request body down to the database.
 
@@ -2889,7 +3226,7 @@ Validation runs in layers, from the request body down to the database.
 
 **Startup.** `InstitutionProperties` and `NotificationProperties` are `@Validated`, an unknown channel name fails in the `NotificationDispatcher` constructor, and `ProjectStateFactory` fails if a status has no state or two.
 
-### 11.4 Concurrency
+## 11. Concurrency
 
 Status changes use optimistic locking. `Project` has a `@Version Long version` column: every change to a project (status, reviewer) increments it, and the UPDATE only matches the version that was read. No lock is held while a user thinks, and conflicts are rare.
 
@@ -2916,108 +3253,11 @@ Tests:
 
 The test suite has no database, so `ConcurrentSubmissionWebTest` uses a store that behaves as `@Version` does: each request loads its own copy and the first save wins. The behaviour of the real column is not exercised by `mvn test`.
 
-The lock covers `Project` only. Operations that do not save a project rely on unique indexes or are last-write-wins (section 15.2).
+The lock covers `Project` only. Operations that do not save a project rely on unique indexes or are last-write-wins (section 14.2).
 
-## 12. Security design
+## 12. Testing design
 
-| Concern | Design |
-|---|---|
-| Passwords | BCrypt (`BCryptPasswordEncoder`), never returned (`UserResponse` has no hash) |
-| Tokens | HS256 JWT, 60-minute expiry, claims `userId` and `role` (+ `sub`), secret from `JWT_SECRET` (startup fails if shorter than 32 bytes) |
-| Sessions | Stateless (`SessionCreationPolicy.STATELESS`), CSRF disabled because no cookies are used |
-| Authorization layer 1 | `@PreAuthorize("hasRole(...)")` on controller methods: STUDENT for create/edit/submit/revise, COORDINATOR for assign, reassign, user list and account creation, FACULTY for reviews |
-| Authorization layer 2 | Ownership and assignment in the service/domain: `ProjectAccessPolicy` for reads and proposal edits, `Guards` inside state transitions. Needed because a role check cannot tell which student owns which project. |
-| Visibility | Business rule 1: `ProjectService.listProjects` scopes queries by role; `requireView` on every per-project read. Notifications: every query is scoped to the caller's id and `NotificationService.markRead` returns 403 for another user's notification |
-| Errors | 401/403 from the filter chain are written by `RestAuthErrorHandler` in `ApiError` format; no stack traces in responses |
-| CORS | Only `prastav.cors.allowed-origin` (default `http://localhost:5173`) for `/api/**`; in development Vite proxies `/api`, so the browser uses one origin |
-| Registration | Self-registration limited to STUDENT with an institutional student email (`PatternEmailPolicy`); FACULTY and COORDINATOR accounts come from `POST /api/users` (COORDINATOR only) or the seed |
-| Frontend | Token in `localStorage` or `sessionStorage` (acceptable for an intranet demo; an httpOnly cookie is the hardening option). A 401 response clears the session. Route guards hide pages by role; the backend remains the authority. |
-
-## 13. Object-oriented design and design patterns
-
-### 13.1 Object-oriented design
-
-**Abstraction.** Callers depend on what something does, not how. `ProjectState` is a project status as a set of actions, and `WorkflowService` never asks which status it holds. `NotificationChannel` is "a way to deliver", so `NotificationDispatcher` does not know about inboxes or logs. `EmailPolicy` hides the institution's address rules from `AuthService` and `UserService`. `AuditRecorder` hides the table behind `AuditEventListener`.
-
-**Encapsulation.** Entities guard their own rules and have no public setters. `Project` changes only through `moveTo` and `assignReviewer`. `ProposalVersion.updateContent` and `ProposalVersion.submit` refuse a submitted version through a private check, so no caller can skip it. `AuditLog` has no mutators at all and is built through `AuditLog.Builder`. `Notification` exposes only `markRead`. `BaseEntity` keeps `id` and `createdAt` private and assigns them in its constructor.
-
-**Inheritance.** `User`, `Project`, `ProposalVersion`, `Review`, `AuditLog` and `Notification` extend `BaseEntity`, which gives them a UUID, a creation time, `isNew` and identity-based `equals`. `ValidationException`, `UnauthenticatedException`, `ForbiddenException`, `NotFoundException`, `ConflictException` and `IllegalTransitionException` extend `PrastavException`. Every state class inherits the "illegal" default methods of `ProjectState`, which is why `ApprovedState` and `RejectedState` declare no action at all.
-
-**Polymorphism.** The same call behaves differently by type, with no `if` on the status. `ProjectState.submit` freezes the draft and moves to SUBMITTED in `DraftState`, but returns to UNDER_REVIEW in `RevisionRequestedState`, and throws in every other state. `ReviewDecisionHandler.apply` runs a different transition per implementation. `NotificationChannel.deliver` stores, logs or retries depending on the object, and `RetryingNotificationChannel` can stand in for any channel. `GlobalExceptionHandler.handleBusiness` reads `PrastavException.getCode` whatever the subclass.
-
-### 13.2 Design patterns
-
-| Pattern | Where (exact classes) | Why it is used here |
-|---|---|---|
-| State | `ProjectState`, `DraftState`, `SubmittedState`, `UnderReviewState`, `RevisionRequestedState`, `ApprovedState`, `RejectedState` | The transition table is the heart of the system. With one class per status there is no status `switch` to keep in step, an action is illegal unless a state allows it, and each state is tested alone with plain `new` |
-| Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewerReassignedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener`; `ProjectStatusChangedEvent`, `ReviewerReassignedEvent` and `ReviewRecordedEvent` also consumed by `NotificationListener` | The workflow only publishes facts and does not know who listens. Audit and notifications need different timing, in the transaction and after commit, which each listener declares for itself |
-| Strategy (review decisions) | `ReviewDecisionHandler`, `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`, looked up by `ReviewService` | Each decision triggers a different transition; a lookup by decision replaces a `switch` in the service |
-| Strategy (notification channels) | `NotificationChannel`, `InAppNotificationChannel`, `EmailNotificationChannel`, chosen by `NotificationDispatcher` from `prastav.notification.enabled-channels` | Delivery routes are chosen by configuration, and a new route is a new class |
-| Strategy (email policy) | `EmailPolicy`, `PatternEmailPolicy`, used by `AuthService`, `UserService` and `DemoDataSeeder` | Address rules differ per institution; the services must not know them |
-| Decorator | `RetryingNotificationChannel` wrapping every channel enabled in `NotificationDispatcher` | Retrying is added around any channel without changing it, and every channel is retried the same way. Because `NotificationService.create` flushes in its own transaction, a failing INSERT is one of those failures |
-| Factory | `ProjectStateFactory` (status to state, fails at startup if a status is missing or claimed twice), `ProposalVersionFactory` (v1, and vN+1 prefilled from vN) | Lookup and creation rules live in one place: version numbering cannot be bypassed, and callers never pick a state class |
-| Builder | `AuditLog.builder()` / `AuditLog.Builder` | An audit entry has six fields, several optional; named steps read better than a long constructor, and `build` checks the required ones |
-| Facade | `WorkflowService` | One small API over states, persistence and events, so every status change takes the same audited path in one transaction |
-| Singleton scope | Every `@Service` and `@Component`, such as `WorkflowService`, `ProjectStateFactory` and `DraftState`, uses Spring's default singleton scope; no class declares `@Scope` or a hand-written `getInstance` | One instance serves all requests, so these classes must hold no request data. The state classes have no fields at all, and the caller travels as an `Actor` parameter. The container owns the single instance, so tests can still use `new`. `RetryingNotificationChannel` is the exception: not a bean, `NotificationDispatcher` creates one per enabled channel at startup |
-| Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects`; `AuditSpecifications` (project, actor, action, date range) combined by `AuditQueryService.search` | One composable query for every list filter instead of a repository method per combination |
-| Repository | `UserRepository`, `ProjectRepository`, `ProposalVersionRepository`, `ReviewRepository`, `AuditLogRepository`, `NotificationRepository` | Persistence abstraction (Spring Data JPA) |
-| DTO + Mapper | `*Request`/`*Response` records, `UserMapper`, `ProjectMapper`, `DashboardMapper`, `ProposalMapper`, `ReviewMapper`, `AuditMapper`, `NotificationMapper` | Entities never leave the service layer as JSON |
-| Value object | `ProposalContent`, `Actor`, `NewProject` | Immutable records passed between layers |
-
-## 14. SOLID mapping
-
-One named class per principle. The same reasoning applies across the codebase.
-
-| Principle | Class | How it applies |
-|---|---|---|
-| **S**ingle responsibility | `ProposalVersionFactory` | Its one job is creating versions and numbering them. Who may create one is `ProposalService`'s question, and persisting is `ProposalVersionRepository`'s |
-| **O**pen/closed | `NotificationDispatcher` | A new delivery route is a new `NotificationChannel` bean and a configuration entry. The dispatcher, the listener and the workflow do not change |
-| **L**iskov substitution | `RetryingNotificationChannel` | It honours the `NotificationChannel` contract (`name` and `deliver`, failure signalled by throwing), so the dispatcher treats it exactly like the channel it wraps. `TerminalStatesTest` checks the same property for `ProjectState` by calling states through the interface |
-| **I**nterface segregation | `AuditRecorder` | One method, `record`. `AuditEventListener` needs to append and nothing else, so it does not see a whole repository |
-| **D**ependency inversion | `AuthService` | It depends on the `EmailPolicy` interface and receives `PatternEmailPolicy` through its constructor, so the high-level registration rule does not depend on address parsing, and a test can pass any policy |
-
-## 15. Design decisions and trade-offs
-
-### 15.1 Decisions
-
-| Decision | Alternatives | Why this one | Cost |
-|---|---|---|---|
-| Modular monolith | Microservices | One team, one database, simple transactions; modules can be split later along the same boundaries | Discipline needed to respect module boundaries |
-| State pattern | Enum + switch | Open/closed, one class per status, isolated tests | More classes; reading the flow means opening several files (mitigated by the diagrams) |
-| Synchronous `@EventListener` for audit | `@TransactionalEventListener(AFTER_COMMIT)`, outbox | Audit must be exactly as durable as the change: same transaction | A failing audit insert rolls back the business change (acceptable: audit is mandatory) |
-| `@TransactionalEventListener` (after commit) for notifications, with one `REQUIRES_NEW` transaction per delivery attempt | Synchronous `@EventListener`, outbox, one transaction around all deliveries | Nobody is notified about a change that rolled back; a delivery failure never rolls back the business change, and one failed attempt cannot affect the next attempt or another recipient | A crash between the commit and the dispatch loses that notification (no outbox); a notification that fails every attempt is logged, not stored |
-| `hibernate.connection.handling_mode: DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION` | Spring's default of holding the connection until the transaction's synchronizations finish; a larger pool | After-commit delivery needs a connection of its own. Holding the request's connection let a burst of requests exhaust the pool while each waited for a second one, and the waiting requests then failed. Returning it at commit removes that wait | A transaction can no longer set a custom isolation level; none does |
-| Immutable versions + DB trigger | Edit in place with history table | Reviews must judge exactly the submitted text; defence in depth | Each revision duplicates text (tiny) |
-| Single reviewer per project | Reviewer panel | One accountable reviewer keeps the workflow simple | Two-reviewer rule needs a policy change (see INTERVIEW_PREP) |
-| Proposal as text fields + link | File upload | No file storage; fields can be validated and compared one by one | Formatting is plain text |
-| Application-assigned UUIDs + `Persistable` | DB sequences | Entities have ids before saving; pure unit tests | Must implement `isNew()` correctly (done in `BaseEntity`) |
-| Optimistic locking on `Project` | Pessimistic locks | Conflicts are rare; no lock waits | Caller sees 409 and retries |
-| `allowedActions` from backend | UI computes from status | One source of truth; UI cannot drift | One more field per detail response |
-| Comments check in state and DB | Only in code | Business rule 5 enforced even for direct SQL | Two places to change if the rule changes |
-| `ddl-auto: none` | `validate` | Flyway is the single source of truth; avoids `TEXT` vs `VARCHAR` false alarms | Mapping errors surface at first query, not at startup |
-| `open-in-view: false`, eager owner/reviewer | OSIV | No lazy loading from controllers | A few extra joins/selects on lists (fine for demo data; the list is paged) |
-| REJECTED is final | Coordinator reopen | A decision stays final and auditable | A reopen would be a new state/transition |
-| Only students self-register | Open registration | Prevent privilege escalation; tie student accounts to the institution | `PatternEmailPolicy`; staff created by the coordinator or seed data |
-
-### 15.2 Known limitations
-
-The frontend has no automated tests. The JWT is kept in browser storage. Docker Compose runs only the database; the backend and frontend run from Maven and npm.
-
-The backend tests run without a database, so JPQL, Flyway migrations and the real `@Version` column are not exercised by `mvn test`.
-
-A notification that fails every attempt is logged at WARN and not stored; it is not queued for later.
-
-**Only `Project` has a version column.** Concurrent operations that do not save a project are handled by unique indexes or are last-write-wins:
-
-| Simultaneous requests | Result | Data |
-|---|---|---|
-| Two `POST /api/projects/{id}/proposals` | One 201; the other 409 `CONCURRENT_UPDATE` when both pass the open-draft check (`uq_proposal_project_version` rejects the second), otherwise 409 `ILLEGAL_TRANSITION` | One new version |
-| Two registrations with one email | One 201; the other 400 `VALIDATION_FAILED` "Email is already registered", the same answer as the check before the insert | One account |
-| Two `PUT /api/projects/{id}/proposal` | Both 200; the last write wins, which is acceptable because a draft has one author | One draft, holding the later content |
-
-## 16. Testing design
-
-### 16.1 Tests (`backend/src/test/java`)
+### 12.1 Tests (`backend/src/test/java`)
 
 | Test class | What it proves |
 |---|---|
@@ -3065,115 +3305,56 @@ A notification that fails every attempt is logged at WARN and not stored; it is 
 
 All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring context and no database are needed. `NotificationListenerTest` calls the listener methods directly, so it checks who is notified with what, not the after-commit timing, which comes from Spring.
 
-## 17. Diagram index
+## 13. Security design
 
-PlantUML sources are in `docs/uml/*.puml` (shared style `_style.iuml`), rendered PNGs in `docs/uml/png/` (PlantUML's built-in Smetana layout, set in `_style.iuml`, so no Graphviz is needed). Mermaid equivalents are in `docs/diagrams.md` with renders in `docs/uml/mermaid-png/`.
-
-| Diagram | File |
+| Concern | Design |
 |---|---|
-| Use cases | `01_use_case` |
-| Domain class diagram | `02_domain_class` |
-| Workflow State-pattern class diagram | `03_workflow_state_pattern` |
-| Project state diagram with guards | `04_project_state` |
-| Sequence: create + submit | `05_seq_create_submit` |
-| Sequence: assign + review + request revision | `06_seq_assign_review_revision` |
-| Sequence: resubmit + approve | `07_seq_resubmit_approve` |
-| Sequence: illegal transition rejected | `08_seq_illegal_transition` |
-| ER diagram | `10_er` |
-| Component / architecture | `11_component_architecture` |
-| Observer and Strategy (domain events, audit, review decisions) | `12_events_and_strategies` |
-| Sequence: notification dispatch | `09_seq_notification_dispatch` |
-| Notification channels (Strategy and Decorator) | `13_notification_classes` |
-| Auth view (EmailPolicy Strategy) | `14_auth_classes` |
-| Activity: submit, assign, review, revise or approve | `15_activity_workflow` |
+| Passwords | BCrypt (`BCryptPasswordEncoder`), never returned (`UserResponse` has no hash) |
+| Tokens | HS256 JWT, 60-minute expiry, claims `userId` and `role` (+ `sub`), secret from `JWT_SECRET` (startup fails if shorter than 32 bytes) |
+| Sessions | Stateless (`SessionCreationPolicy.STATELESS`), CSRF disabled because no cookies are used |
+| Authorization layer 1 | `@PreAuthorize("hasRole(...)")` on controller methods: STUDENT for create/edit/submit/revise, COORDINATOR for assign, reassign, user list and account creation, FACULTY for reviews |
+| Authorization layer 2 | Ownership and assignment in the service/domain: `ProjectAccessPolicy` for reads and proposal edits, `Guards` inside state transitions. Needed because a role check cannot tell which student owns which project. |
+| Visibility | Business rule 1: `ProjectService.listProjects` scopes queries by role; `requireView` on every per-project read. Notifications: every query is scoped to the caller's id and `NotificationService.markRead` returns 403 for another user's notification |
+| Errors | 401/403 from the filter chain are written by `RestAuthErrorHandler` in `ApiError` format; no stack traces in responses |
+| CORS | Only `prastav.cors.allowed-origin` (default `http://localhost:5173`) for `/api/**`; in development Vite proxies `/api`, so the browser uses one origin |
+| Registration | Self-registration limited to STUDENT with an institutional student email (`PatternEmailPolicy`); FACULTY and COORDINATOR accounts come from `POST /api/users` (COORDINATOR only) or the seed |
+| Frontend | Token in `localStorage` or `sessionStorage` (acceptable for an intranet demo; an httpOnly cookie is the hardening option). A 401 response clears the session. Route guards hide pages by role; the backend remains the authority. |
 
-### Use cases
+## 14. Design decisions and trade-offs
 
-![Use cases](uml/png/01_use_case.png)
+### 14.1 Decisions
 
-### Domain model
+| Decision | Alternatives | Why this one | Cost |
+|---|---|---|---|
+| Modular monolith | Microservices | One team, one database, simple transactions; modules can be split later along the same boundaries | Discipline needed to respect module boundaries |
+| State pattern | Enum + switch | Open/closed, one class per status, isolated tests | More classes; reading the flow means opening several files (mitigated by the diagrams) |
+| Synchronous `@EventListener` for audit | `@TransactionalEventListener(AFTER_COMMIT)`, outbox | Audit must be exactly as durable as the change: same transaction | A failing audit insert rolls back the business change (acceptable: audit is mandatory) |
+| `@TransactionalEventListener` (after commit) for notifications, with one `REQUIRES_NEW` transaction per delivery attempt | Synchronous `@EventListener`, outbox, one transaction around all deliveries | Nobody is notified about a change that rolled back; a delivery failure never rolls back the business change, and one failed attempt cannot affect the next attempt or another recipient | A crash between the commit and the dispatch loses that notification (no outbox); a notification that fails every attempt is logged, not stored |
+| `hibernate.connection.handling_mode: DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION` | Spring's default of holding the connection until the transaction's synchronizations finish; a larger pool | After-commit delivery needs a connection of its own. Holding the request's connection let a burst of requests exhaust the pool while each waited for a second one, and the waiting requests then failed. Returning it at commit removes that wait | A transaction can no longer set a custom isolation level; none does |
+| Immutable versions + DB trigger | Edit in place with history table | Reviews must judge exactly the submitted text; defence in depth | Each revision duplicates text (tiny) |
+| Single reviewer per project | Reviewer panel | One accountable reviewer keeps the workflow simple | Two-reviewer rule needs a policy change (see INTERVIEW_PREP) |
+| Proposal as text fields + link | File upload | No file storage; fields can be validated and compared one by one | Formatting is plain text |
+| Application-assigned UUIDs + `Persistable` | DB sequences | Entities have ids before saving; pure unit tests | Must implement `isNew()` correctly (done in `BaseEntity`) |
+| Optimistic locking on `Project` | Pessimistic locks | Conflicts are rare; no lock waits | Caller sees 409 and retries |
+| `allowedActions` from backend | UI computes from status | One source of truth; UI cannot drift | One more field per detail response |
+| Comments check in state and DB | Only in code | Business rule 5 enforced even for direct SQL | Two places to change if the rule changes |
+| `ddl-auto: none` | `validate` | Flyway is the single source of truth; avoids `TEXT` vs `VARCHAR` false alarms | Mapping errors surface at first query, not at startup |
+| `open-in-view: false`, eager owner/reviewer | OSIV | No lazy loading from controllers | A few extra joins/selects on lists (fine for demo data; the list is paged) |
+| REJECTED is final | Coordinator reopen | A decision stays final and auditable | A reopen would be a new state/transition |
+| Only students self-register | Open registration | Prevent privilege escalation; tie student accounts to the institution | `PatternEmailPolicy`; staff created by the coordinator or seed data |
 
-![Domain class diagram](uml/png/02_domain_class.png)
+### 14.2 Known limitations
 
-### Sequence: create and submit
+The frontend has no automated tests. The JWT is kept in browser storage. Docker Compose runs only the database; the backend and frontend run from Maven and npm.
 
-![Create and submit](uml/png/05_seq_create_submit.png)
+The backend tests run without a database, so JPQL, Flyway migrations and the real `@Version` column are not exercised by `mvn test`.
 
-### Sequence: assign, review, request revision
+A notification that fails every attempt is logged at WARN and not stored; it is not queued for later.
 
-![Assign and review](uml/png/06_seq_assign_review_revision.png)
+**Only `Project` has a version column.** Concurrent operations that do not save a project are handled by unique indexes or are last-write-wins:
 
-### Sequence: resubmit and approve
-
-![Resubmit and approve](uml/png/07_seq_resubmit_approve.png)
-
-### Sequence: illegal transition
-
-![Illegal transition](uml/png/08_seq_illegal_transition.png)
-
-### Sequence: notification dispatch
-
-![Notification dispatch](uml/png/09_seq_notification_dispatch.png)
-
-### Auth view
-
-![Auth view](uml/png/14_auth_classes.png)
-
-### Activity: submit, assign, review, revise or approve
-
-![Activity](uml/png/15_activity_workflow.png)
-
-## 18. Frontend architecture
-
-The web app (`frontend/`, artifact `prastav-frontend`) is a React 18 + TypeScript single-page app built with Vite. Styling is Tailwind CSS 3 with the design tokens in `tailwind.config.js` (documented in `docs/design/README.md`); icons come from lucide-react and the Plus Jakarta Sans font is self-hosted.
-
-### 18.1 Routing and guards
-
-`src/router.tsx` defines one `createBrowserRouter` tree (a data router, which the wizard needs for `useBlocker`).
-
-| Route | Element | Guard |
+| Simultaneous requests | Result | Data |
 |---|---|---|
-| `/` | `LandingPage` (redirects a signed-in user to `/app`) | none |
-| `/login`, `/register` | `LoginPage`, `RegisterPage` inside `AuthLayout` | none (a signed-in user is redirected) |
-| `/app` | `AppShell` with `HomePage` (`StudentHome`, `FacultyHome` or `CoordinatorHome`) | `RequireAuth` |
-| `/app/projects` | `ProjectsPage` configured by role (My, Assigned or All Projects) | `RequireAuth` |
-| `/app/projects/new`, `/app/projects/:id/edit` | `ProjectWizardPage` | `RequireAuth roles=[STUDENT]` |
-| `/app/projects/:id` | `ProjectDetailPage` | `RequireAuth` (the API enforces participation) |
-| `/app/reviews` | `ProjectsPage mode="reviews"` (Under Review, oldest first) | `RequireAuth roles=[FACULTY, COORDINATOR]` |
-| `/app/dashboard` | `DashboardPage` (status counts, waiting for assignment, reviewer workload) | `RequireAuth roles=[COORDINATOR]` |
-| `/app/assign` | `AssignPage` (Submitted projects) | `RequireAuth roles=[COORDINATOR]` |
-| `/app/notifications` | `NotificationsPage` (the caller's whole inbox) | `RequireAuth` (the API scopes the inbox to the caller) |
-
-`RequireAuth` sends an anonymous visitor to `/login` with the requested path in the navigation state, so signing in returns there; a wrong role goes to `/app`. Route guards only shape navigation: every rule is enforced again by the API.
-
-### 18.2 Layouts and component structure
-
-| Folder | Contents |
-|---|---|
-| `src/layouts/` | `AppShell`: sidebar with role navigation from `config/navigation.ts` (a drawer below the `lg` breakpoint), top bar with global search (navigates to `/app/projects?q=`), `NotificationBell` and the account menu; `AuthLayout`: split layout for sign in and registration |
-| `src/components/ui/` | Design system: `Button`, `Input`/`Textarea`/`Select`, `Card`, `StatCard`, `StatusPill`, `Avatar`/`AvatarStack`, `DataTable`, `Pagination`, `FilterBar`, `Tabs`, `Stepper`, `DropdownMenu`, `Modal`, `ToastProvider`, `Skeleton`, `EmptyState`, `PageHeader`, `CtaBand`, `Logo` |
-| `src/components/` | Domain components: `WorkflowRail`, `ReviewPanel`, `AssignReviewerPanel`, `NotificationBell` (unread badge and a dropdown of the latest five), `NotificationItem` (one inbox row, shared by the dropdown and the page), `ProposalFields`/`ProposalView`, `VersionCompare` (two version pickers, every field side by side, changed fields highlighted), `ErrorNote`, and the label maps in `labels.ts` (including the timeline entry types) |
-| `src/pages/` | One file per screen; `pages/home/` holds the role homes and `pages/projects/` the shared table columns and the assign dialog |
-| `src/config/` | `brand.ts` (product name, tagline, institution), `navigation.ts`, `demoAccounts.ts` |
-| `src/assets/` | Illustrations and `index.ts`, the single place every image is referenced |
-| `src/lib/` | Formatting, people helpers (initials, avatar colour, team parsing), `useProjectListParams`, `useDebouncedValue`, `useDocumentTitle`, `useNotifications` (inbox queries, mark-read mutations, `notificationLink`) |
-
-### 18.3 Data flow
-
-- `src/api/client.ts` is the Axios instance. It adds the Bearer token from the stored session, clears the session and returns to `/login` on a 401, and turns any error into one readable sentence (`errorMessage`) or per-field messages (`fieldErrors`). The session is kept in `localStorage` when "Remember me" is ticked and in `sessionStorage` otherwise.
-- `src/api/endpoints.ts` has one function per endpoint and `src/api/types.ts` mirrors the backend DTOs. `listProjects` reads the `ProjectPageResponse` envelope and returns `{ items, total, page, size, totalPages }` (`content`, `totalElements` and the paging numbers).
-- Server state lives in TanStack Query. Keys start with `['projects']` for lists and counts, `['project', id]`, `['versions', id]`, `['reviews', id]`, `['history', id]` and `['compare', id, from, to]` for one project, and `['notifications', userId, ...]` for the inbox, where the user id keeps one account's inbox out of the next one's cache in the same tab. Every mutation invalidates the keys it affects, so lists, dashboards and the project page stay in step.
-- List filters (`status`, `q`, `reviewerId`, `admissionYear`, `branch`, `sort`, `page`) live in the URL through `useProjectListParams`, so a filtered list can be shared; the search and branch boxes update the URL after a 300 ms pause (the branch is upper-cased) and paging keeps the previous page on screen while the next one loads. The batch year and branch controls are shown to the coordinator only; the year offers this year and the five before it. The pager reads `page`, `size` and `totalElements` from the response envelope, and a page past the end (for example from an old link) moves to the last page.
-- The unread count and any inbox list on screen refetch every 30 seconds (`refetchInterval`, paused by TanStack Query while the tab is hidden); the dropdown only loads while open. Opening a notification marks it read and goes to its project. A `REVIEWER_UNASSIGNED` notification has no link because that reviewer can no longer open the project. The notifications page keeps its page number in the URL and moves to the last page if the number is past the end.
-- Buttons for workflow actions come only from `allowedActions` in `ProjectDetailResponse`. List rows, which carry no `allowedActions`, only offer shortcuts that the target page checks again (for example "Edit draft" for a DRAFT row opens the wizard, which shows "Nothing to edit" if the draft is gone).
-- `AssignReviewerPanel` also reassigns: given `reassignFrom` (the current reviewer) it leaves that person out of the list and calls `PUT /api/projects/{id}/assign`. `ProjectDetailPage` shows it only when `allowedActions` includes `REASSIGN_REVIEWER`, next to the message saying who the project is waiting for.
-- `DashboardPage` reads `GET /api/dashboard/summary` under the key `['projects', 'dashboard']`, so an assignment from its quick-assign dialog (the shared `AssignDialog`) or from anywhere else refreshes it. Each status count opens the project list filtered by that status, and each reviewer opens the list filtered by that reviewer and UNDER_REVIEW.
-
-### 18.4 Wizard
-
-`ProjectWizardPage` writes a proposal in four steps: Basic Info, Problem and Objectives, Methodology and Outcomes, Timeline and Review. Next validates the current step; Save draft works at every step and creates the project on the first save (`POST /api/projects`), then updates the open draft (`PUT /api/projects/{id}/proposal`). Project details (title, description, tech stack, team) are read-only when editing because the API has no endpoint to change them. Submit opens a confirmation dialog, saves, then calls `POST /api/projects/{id}/submit`. For a project in REVISION_REQUESTED the same page shows a "Revision v{n}" banner and the reviewer's latest feedback in a collapsible side panel. Leaving with unsaved changes asks for confirmation (`useBlocker` and `beforeunload`).
-
-### 18.5 States and accessibility
-
-Every data view has a loading skeleton, an empty state and an error with Retry; successful actions show a toast. Inputs are labelled, errors are announced (`role="alert"`, live regions for toasts and counters), menus, tabs, the stepper and dialogs are keyboard operable with visible focus, and animations respect `prefers-reduced-motion`. The layout is designed at 1440px and works down to 360px: the sidebar becomes a drawer and tables scroll sideways.
-
+| Two `POST /api/projects/{id}/proposals` | One 201; the other 409 `CONCURRENT_UPDATE` when both pass the open-draft check (`uq_proposal_project_version` rejects the second), otherwise 409 `ILLEGAL_TRANSITION` | One new version |
+| Two registrations with one email | One 201; the other 400 `VALIDATION_FAILED` "Email is already registered", the same answer as the check before the insert | One account |
+| Two `PUT /api/projects/{id}/proposal` | Both 200; the last write wins, which is acceptable because a draft has one author | One draft, holding the later content |

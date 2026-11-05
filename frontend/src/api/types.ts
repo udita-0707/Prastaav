@@ -1,4 +1,4 @@
-// Mirrors the backend DTOs (com.prastav.*.web). Keep in sync with docs/LLD.md section 9.
+// Mirrors the backend DTOs (com.prastav.*.web). Keep in sync with docs/LLD.md section 7.
 
 export type Role = 'STUDENT' | 'FACULTY' | 'COORDINATOR';
 
