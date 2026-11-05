@@ -61,7 +61,7 @@ export function VersionCompare({ projectId, versions }: { projectId: string; ver
   const diff = useQuery({ queryKey: ['compare', projectId, from, to], queryFn: () => compareVersions(projectId, from, to), enabled: ready });
 
   if (versions.length < 2) {
-    return <EmptyState title="Only one version so far" description="Once the student starts a second version, you can compare any two versions here." />;
+    return <EmptyState title="Only one version so far" description="Once a second version exists, you can compare any two versions here." />;
   }
   const changed = diff.data?.fields.filter((f) => f.changed).length ?? 0;
 
