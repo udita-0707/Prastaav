@@ -119,7 +119,7 @@ export function FacultyHome({ user }: { user: UserResponse }) {
         </Card>
       </div>
 
-      <aside className="space-y-6">
+      <aside className="space-y-6" aria-label="Review queue">
         <Card className="p-5">
           <CardHeader
             icon={<Clock3 className="h-5 w-5" aria-hidden />}

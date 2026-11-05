@@ -74,7 +74,7 @@ export function DashboardPage() {
               <li key={reviewer.id}>
                 <Link
                   to={`/app/projects?status=UNDER_REVIEW&reviewerId=${reviewer.id}`}
-                  aria-label={`${reviewer.name}: ${openReviews} under review`}
+                  aria-label={`${reviewer.name} ${openReviews} under review`}
                   className="group flex items-center gap-3 rounded-xl p-2.5 hover:bg-slate-50"
                 >
                   <Avatar name={reviewer.name} size="sm" />

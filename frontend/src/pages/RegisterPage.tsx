@@ -29,7 +29,7 @@ export function RegisterPage() {
   return (
     <AuthLayout>
       <Card className="p-6 sm:p-10">
-        <h2 className="text-3xl font-bold tracking-tight text-ink">Create your account</h2>
+        <h1 className="text-3xl font-bold tracking-tight text-ink">Create your account</h1>
         <p className="mt-2 text-muted">
           Join {PRODUCT_NAME} as a student. Faculty and coordinator accounts are created by your coordinator.
         </p>

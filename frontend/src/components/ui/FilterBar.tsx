@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 /** Toolbar row above a table: a search field that grows, then compact filters. Wraps on small screens. */
 export function FilterBar({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div role="search" className={clsx('flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center', className)}>
+    <div role="search" aria-label="Filter this list" className={clsx('flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center', className)}>
       {children}
     </div>
   );

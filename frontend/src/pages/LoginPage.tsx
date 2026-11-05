@@ -39,7 +39,7 @@ export function LoginPage() {
   return (
     <AuthLayout>
       <Card className="p-6 sm:p-10">
-        <h2 className="text-3xl font-bold tracking-tight text-ink">Welcome back!</h2>
+        <h1 className="text-3xl font-bold tracking-tight text-ink">Welcome back!</h1>
         <p className="mt-2 text-muted">Sign in to continue to {PRODUCT_NAME}</p>
         {expired && (
           <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
@@ -121,10 +121,12 @@ export function LoginPage() {
 
         {SHOW_DEMO_ACCOUNTS && (
           <section className="mt-8" aria-labelledby="demo-heading">
-            <h3 id="demo-heading" className="text-sm font-semibold text-ink">
+            <h2 id="demo-heading" className="text-sm font-semibold text-ink">
               Try demo accounts
-            </h3>
-            <p className="mt-1 text-xs text-muted">Fills in the form; then press Sign in.</p>
+            </h2>
+            <p id="demo-hint" className="mt-1 text-xs text-muted">
+              Fills in the form; then press Sign in.
+            </p>
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               {DEMO_ACCOUNTS.map(({ role, name, email: demoEmail }) => {
                 const Icon = DEMO_ICON[role];
@@ -138,7 +140,7 @@ export function LoginPage() {
                       setError(null);
                     }}
                     className="flex items-center gap-3 rounded-field border border-line bg-white px-3 py-2.5 text-left text-sm font-medium text-ink transition-colors hover:border-brand-300 hover:bg-brand-50"
-                    aria-label={`Fill in the demo account of ${name}, ${ROLE_LABEL[role].toLowerCase()}`}
+                    aria-describedby="demo-hint"
                   >
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-50 text-accent-600">
                       <Icon className="h-4 w-4" aria-hidden />
