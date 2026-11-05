@@ -37,7 +37,7 @@ public class AuthService {
         }
         StudentEmail studentEmail = emailPolicy.requireStudent(email);
         if (userRepository.existsByEmail(studentEmail.email())) {
-            throw new ValidationException("Email is already registered");
+            throw new ValidationException(ValidationException.EMAIL_ALREADY_REGISTERED);
         }
         User user = userRepository.save(User.student(name.trim(), studentEmail, passwordEncoder.encode(password)));
         return new AuthResult(jwtService.generateToken(user), user);

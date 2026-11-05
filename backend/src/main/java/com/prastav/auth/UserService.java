@@ -57,7 +57,7 @@ public class UserService {
         }
         String normalizedEmail = emailPolicy.requireInstitutional(email);
         if (userRepository.existsByEmail(normalizedEmail)) {
-            throw new ValidationException("Email is already registered");
+            throw new ValidationException(ValidationException.EMAIL_ALREADY_REGISTERED);
         }
         return userRepository.save(new User(name.trim(), normalizedEmail, passwordEncoder.encode(password), role));
     }

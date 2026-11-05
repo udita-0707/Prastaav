@@ -14,7 +14,10 @@ import com.prastav.workflow.RejectedState;
 import com.prastav.workflow.RevisionRequestedState;
 import com.prastav.workflow.SubmittedState;
 import com.prastav.workflow.UnderReviewState;
+import org.hibernate.exception.ConstraintViolationException;
+import org.springframework.dao.DataIntegrityViolationException;
 
+import java.sql.SQLException;
 import java.util.List;
 
 /** Plain-Java fixtures shared by the unit tests. No Spring, no database. */
@@ -66,6 +69,13 @@ public final class TestData {
         ProposalVersion version = draft(project, versionNumber, completeContent());
         version.submit();
         return version;
+    }
+
+    /** The exception Spring raises when PostgreSQL rejects an insert, with the SQL text a client must never see. */
+    public static DataIntegrityViolationException uniqueViolation(String constraint) {
+        String detail = "ERROR: duplicate key value violates unique constraint \"" + constraint + "\"";
+        return new DataIntegrityViolationException("could not execute statement [" + detail + "] [insert into t]",
+                new ConstraintViolationException("could not execute statement", new SQLException(detail), constraint));
     }
 
     public static ProjectStateFactory stateFactory() {

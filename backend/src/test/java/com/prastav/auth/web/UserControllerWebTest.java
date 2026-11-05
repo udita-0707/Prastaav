@@ -9,6 +9,7 @@ import com.prastav.auth.User;
 import com.prastav.auth.UserService;
 import com.prastav.common.ValidationException;
 import org.junit.jupiter.api.Test;
+import com.prastav.support.TestData;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -97,5 +98,19 @@ class UserControllerWebTest {
                         .content(FACULTY_BODY))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"));
+    }
+
+    @Test
+    void losingAnAccountCreationRaceToTheUniqueIndexAnswersLikeTheDuplicateEmailCheck() throws Exception {
+        when(userService.createAccount(any(Actor.class), any(), any(), any(), any()))
+                .thenThrow(TestData.uniqueViolation("users_email_key"));
+
+        mockMvc.perform(post("/api/users")
+                        .header("Authorization", bearer(Role.COORDINATOR))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(FACULTY_BODY))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.message").value("Email is already registered"));
     }
 }
