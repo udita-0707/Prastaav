@@ -114,6 +114,27 @@ export interface ProjectCountsResponse {
   awaitingAssignment: number | null;
 }
 
+/** A submitted project that has no reviewer yet. */
+export interface AwaitingAssignment {
+  id: string;
+  title: string;
+  owner: UserSummary;
+  waitingSince: string;
+}
+
+export interface ReviewerWorkload {
+  reviewer: UserSummary;
+  openReviews: number;
+}
+
+/** Body of GET /api/dashboard/summary. awaitingAssignment is oldest first, reviewerWorkload busiest first. */
+export interface DashboardSummaryResponse {
+  total: number;
+  byStatus: Record<ProjectStatus, number>;
+  awaitingAssignment: AwaitingAssignment[];
+  reviewerWorkload: ReviewerWorkload[];
+}
+
 export interface ProjectDetailResponse {
   id: string;
   title: string;

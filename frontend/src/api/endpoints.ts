@@ -2,6 +2,7 @@ import { api } from './client';
 import type {
   AuthResponse,
   CreateProjectRequest,
+  DashboardSummaryResponse,
   NotificationPageResponse,
   NotificationResponse,
   ProjectCountsResponse,
@@ -34,6 +35,8 @@ export const listProjects = ({ status, ...rest }: ProjectListParams = {}) =>
 
 export const getProjectCounts = () => api.get<ProjectCountsResponse>('/projects/summary').then((r) => r.data);
 
+export const getDashboardSummary = () => api.get<DashboardSummaryResponse>('/dashboard/summary').then((r) => r.data);
+
 export const getProject = (id: string) =>
   api.get<ProjectDetailResponse>(`/projects/${id}`).then((r) => r.data);
 
@@ -57,6 +60,9 @@ export const submitProject = (projectId: string) =>
 
 export const assignReviewer = (projectId: string, facultyId: string) =>
   api.post<ProjectDetailResponse>(`/projects/${projectId}/assign`, { facultyId }).then((r) => r.data);
+
+export const reassignReviewer = (projectId: string, facultyId: string) =>
+  api.put<ProjectDetailResponse>(`/projects/${projectId}/assign`, { facultyId }).then((r) => r.data);
 
 export const recordReview = (projectId: string, body: ReviewRequest) =>
   api.post<ReviewResponse>(`/projects/${projectId}/reviews`, body).then((r) => r.data);

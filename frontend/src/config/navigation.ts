@@ -1,4 +1,4 @@
-import { ClipboardCheck, FolderKanban, Home, PlusCircle, UserPlus, type LucideIcon } from 'lucide-react';
+import { ClipboardCheck, FolderKanban, Home, LayoutDashboard, PlusCircle, UserPlus, type LucideIcon } from 'lucide-react';
 import type { Role } from '../api/types';
 
 export interface NavItem {
@@ -23,6 +23,7 @@ export const NAV_ITEMS: Record<Role, NavItem[]> = {
   ],
   COORDINATOR: [
     HOME,
+    { label: 'Dashboard', to: '/app/dashboard', icon: LayoutDashboard },
     { label: 'All Projects', to: '/app/projects', icon: FolderKanban },
     { label: 'Assign Faculty', to: '/app/assign', icon: UserPlus },
     { label: 'Reviews', to: '/app/reviews', icon: ClipboardCheck },
