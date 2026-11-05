@@ -32,14 +32,15 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// An expired or invalid token ends the session.
+// An expired or invalid token ends the session; the sign-in page says why and comes back to this page afterwards.
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
     const isLogin = error.config?.url?.startsWith('/auth/');
     if (error.response?.status === 401 && !isLogin) {
       saveSession(null);
-      window.location.assign('/login');
+      const here = window.location.pathname + window.location.search;
+      window.location.assign(`/login?expired=1&next=${encodeURIComponent(here)}`);
     }
     return Promise.reject(error);
   },
@@ -53,7 +54,8 @@ export function errorMessage(error: unknown): string {
       const fields = body.fieldErrors?.map((f) => `${f.field}: ${f.message}`).join('; ');
       return fields ? `${body.message} (${fields})` : body.message;
     }
-    if (!error.response) return 'The server is not reachable. Is the backend running on port 8080?';
+    if (!error.response) return 'The server is not reachable. Check your connection and try again.';
+    if (error.response.status >= 500) return 'The server could not complete this request. Try again in a moment.';
   }
   return 'Something went wrong. Try again.';
 }

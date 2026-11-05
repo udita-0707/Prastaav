@@ -1,6 +1,6 @@
 import { ArrowRight, Eye, EyeOff, GraduationCap, Lock, Mail, UserRound, UsersRound, type LucideIcon } from 'lucide-react';
 import { useState } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { errorMessage } from '../api/client';
 import type { Role } from '../api/types';
 import { ROLE_LABEL } from '../components/labels';
@@ -14,12 +14,19 @@ import { useDocumentTitle } from '../lib/useDocumentTitle';
 
 const DEMO_ICON: Record<Role, LucideIcon> = { STUDENT: GraduationCap, FACULTY: UserRound, COORDINATOR: UsersRound };
 
+/** The return path from the URL, only if it stays inside this app. */
+function safeReturnPath(next: string | null): string | null {
+  return next && next.startsWith('/') && !next.startsWith('//') ? next : null;
+}
+
 export function LoginPage() {
   useDocumentTitle('Sign in');
   const { user, login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as { from?: string } | null)?.from ?? '/app';
+  const [searchParams] = useSearchParams();
+  const from = (location.state as { from?: string } | null)?.from ?? safeReturnPath(searchParams.get('next')) ?? '/app';
+  const expired = searchParams.has('expired');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -34,6 +41,11 @@ export function LoginPage() {
       <Card className="p-6 sm:p-10">
         <h2 className="text-3xl font-bold tracking-tight text-ink">Welcome back!</h2>
         <p className="mt-2 text-muted">Sign in to continue to {PRODUCT_NAME}</p>
+        {expired && (
+          <p className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="status">
+            Your session has expired. Sign in again to continue where you left off.
+          </p>
+        )}
         <form
           className="mt-8 space-y-5"
           noValidate={false}

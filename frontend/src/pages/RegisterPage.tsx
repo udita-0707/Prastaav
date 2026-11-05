@@ -38,6 +38,10 @@ export function RegisterPage() {
           onSubmit={async (e) => {
             e.preventDefault();
             if (mismatch) return;
+            if (!name.trim()) {
+              setFields({ name: 'Enter your full name.' });
+              return;
+            }
             setBusy(true);
             setError(null);
             setFields({});

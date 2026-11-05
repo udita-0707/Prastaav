@@ -2366,7 +2366,7 @@ The web app (`frontend/`, artifact `prastav-frontend`) is a React 18 + TypeScrip
 | `/app/assign` | `AssignPage` (Submitted projects) | `RequireAuth roles=[COORDINATOR]` |
 | `/app/notifications` | `NotificationsPage` (the caller's whole inbox) | `RequireAuth` (the API scopes the inbox to the caller) |
 
-`RequireAuth` sends an anonymous visitor to `/login` with the requested path in the navigation state, so signing in returns there; a wrong role goes to `/app`. Route guards only shape navigation: every rule is enforced again by the API.
+`RequireAuth` sends an anonymous visitor to `/login` with the requested path in the navigation state, so signing in returns there; a wrong role sees a "no access" page with a link home and the URL unchanged. A token the API refuses (401) ends the session and opens `/login` with a notice, then returns to the same page after signing in. Route guards only shape navigation: every rule is enforced again by the API.
 
 #### 2.7.2 Layouts and component structure
 
@@ -2398,7 +2398,7 @@ The web app (`frontend/`, artifact `prastav-frontend`) is a React 18 + TypeScrip
 
 #### 2.7.5 States and accessibility
 
-Every data view has a loading skeleton, an empty state and an error with Retry; successful actions show a toast. Inputs are labelled, errors are announced (`role="alert"`, live regions for toasts and counters), menus, tabs, the stepper and dialogs are keyboard operable with visible focus, and animations respect `prefers-reduced-motion`. The layout is designed at 1440px and works down to 360px: the sidebar becomes a drawer and tables scroll sideways.
+Every data view has a loading skeleton, an empty state and an error with Retry; successful actions show a toast. A project that cannot be opened (403, 404 or a malformed id) shows a "not available" page with a way back rather than a Retry. When an action is refused with 403 or 409 because the project moved on, `useRefusedAction` reloads the project so the buttons match `allowedActions` again and explains why in a toast. Submit is disabled while `missingFields` is not empty. Inputs are labelled, errors are announced (`role="alert"`, live regions for toasts and counters), menus, tabs, the stepper and dialogs are keyboard operable with visible focus, and animations respect `prefers-reduced-motion`. The layout is designed at 1440px and works down to 360px: the sidebar becomes a drawer and tables scroll sideways.
 
 ## 3. Object-oriented design
 

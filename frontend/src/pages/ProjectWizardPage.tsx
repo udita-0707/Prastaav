@@ -6,6 +6,7 @@ import { errorMessage } from '../api/client';
 import { createProject, getProject, listReviews, submitProject, updateDraft } from '../api/endpoints';
 import type { ProjectDetailResponse, ProposalContent } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
+import { ProjectLoadError } from '../components/ProjectLoadError';
 import { EMPTY_PROPOSAL, isWebLink, ProposalFields, ProposalView, REQUIRED_TO_SUBMIT } from '../components/ProposalFields';
 import { Button, ButtonLink, Card, EmptyState, IconTile, Input, Modal, Skeleton, Stepper, Textarea, useToast } from '../components/ui';
 import { DECISION_LABEL, FIELD_LABEL } from '../components/labels';
@@ -246,7 +247,7 @@ export function ProjectWizardPage() {
       </Card>
     );
   }
-  if (isEdit && project.error) return <ErrorNote message={errorMessage(project.error)} onRetry={() => project.refetch()} />;
+  if (isEdit && project.error) return <ProjectLoadError error={project.error} onRetry={() => project.refetch()} />;
 
   const draft = project.data?.currentProposal;
   if (noOpenDraft) {

@@ -9,6 +9,7 @@ import type { ProjectDetailResponse, ProjectStatus, ReviewResponse, TimelineEntr
 import { AssignReviewerPanel } from '../components/AssignReviewerPanel';
 import { ErrorNote } from '../components/ErrorNote';
 import { DECISION_LABEL, FIELD_LABEL, STATUS_LABEL, TIMELINE_TYPE_LABEL } from '../components/labels';
+import { ProjectLoadError } from '../components/ProjectLoadError';
 import { ProposalView } from '../components/ProposalFields';
 import { ReviewPanel } from '../components/ReviewPanel';
 import { VersionCompare } from '../components/VersionCompare';
@@ -142,7 +143,7 @@ export function ProjectDetailPage() {
       </div>
     );
   }
-  if (project.error || !project.data) return <ErrorNote message={errorMessage(project.error)} onRetry={() => project.refetch()} />;
+  if (project.error || !project.data) return <ProjectLoadError error={project.error} onRetry={() => project.refetch()} />;
 
   const p = project.data;
   const allowed = p.allowedActions;
