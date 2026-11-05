@@ -26,7 +26,7 @@
 - Follow every review in progress from the "Reviews" list.
 - Create faculty and coordinator accounts on the institutional domain through `POST /api/users`.
 - Open the **Dashboard** page: counts for every status, the submitted projects still waiting for a reviewer (oldest first) with a quick assign, and the open reviews of every faculty member. An open review is a project `UNDER_REVIEW`; the data comes from `GET /api/dashboard/summary`.
-- Query the audit log through `GET /api/audit`: newest first and paged, filtered by project, actor, action and date range.
+- Read the **Audit Log** page: every important action newest first and paged, with readable labels, filtered by project, actor, action and date range. The data comes from `GET /api/audit`.
 
 **Everyone**
 - A notification bell in the top bar with the unread count (refreshed every 30 seconds) and a dropdown of the latest five, each of which can be marked as read or opened.
@@ -46,6 +46,7 @@
 | Edit draft or revision | `/app/projects/:id/edit` | student owner |
 | Reviews (Under Review projects) | `/app/reviews` | faculty, coordinator |
 | Dashboard: status counts, waiting-for-assignment list with quick assign, reviewer workload | `/app/dashboard` | coordinator |
+| Audit log: filters by project, actor, action and date range, pager, readable action labels | `/app/audit` | coordinator |
 | Assign faculty | `/app/assign` | coordinator |
 | Notifications: whole inbox, pager, mark one or all read | `/app/notifications` | everyone signed in |
 
@@ -206,8 +207,8 @@ frontend/
   src/components/        domain components (WorkflowRail, ReviewPanel, AssignReviewerPanel, NotificationBell, NotificationItem, ProposalFields, ErrorNote)
   src/config/           brand, navigation, demo accounts
   src/layouts/           AppShell (sidebar, top bar with notification bell), AuthLayout
-  src/lib/               formatting, people helpers, list-parameter, debounce and notification hooks
-  src/pages/             landing, auth, role homes, project list, wizard, project page, dashboard, assign, notifications
+  src/lib/               formatting, people helpers, audit entry text, list-parameter, debounce and notification hooks
+  src/pages/             landing, auth, role homes, project list, wizard, project page, dashboard, assign, audit log, notifications
   src/router.tsx         routes and guards
   tailwind.config.js     design tokens
 ```

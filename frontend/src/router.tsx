@@ -2,6 +2,7 @@ import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { RequireAuth } from './auth/RequireAuth';
 import { AppShell } from './layouts/AppShell';
 import { AssignPage } from './pages/AssignPage';
+import { AuditPage } from './pages/AuditPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { HomePage } from './pages/HomePage';
 import { LandingPage } from './pages/LandingPage';
@@ -30,6 +31,7 @@ export const router = createBrowserRouter([
       { path: 'projects/new', element: <RequireAuth roles={['STUDENT']}><ProjectWizardPage key="new" /></RequireAuth> },
       { path: 'projects/:id', element: <ProjectDetailPage /> },
       { path: 'dashboard', element: <RequireAuth roles={['COORDINATOR']}><DashboardPage /></RequireAuth> },
+      { path: 'audit', element: <RequireAuth roles={['COORDINATOR']}><AuditPage /></RequireAuth> },
       { path: 'reviews', element: <RequireAuth roles={['FACULTY', 'COORDINATOR']}><ProjectsPage key="reviews" mode="reviews" /></RequireAuth> },
       { path: 'assign', element: <RequireAuth roles={['COORDINATOR']}><AssignPage /></RequireAuth> },
       { path: 'notifications', element: <NotificationsPage /> },

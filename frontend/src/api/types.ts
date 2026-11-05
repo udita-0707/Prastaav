@@ -135,6 +135,49 @@ export interface DashboardSummaryResponse {
   reviewerWorkload: ReviewerWorkload[];
 }
 
+export type AuditAction =
+  | 'PROJECT_CREATED'
+  | 'VERSION_CREATED'
+  | 'DRAFT_UPDATED'
+  | 'PROPOSAL_SUBMITTED'
+  | 'REVIEWER_ASSIGNED'
+  | 'REVIEWER_REASSIGNED'
+  | 'REVIEW_RECORDED'
+  | 'STATUS_CHANGED';
+
+export interface AuditLogResponse {
+  id: string;
+  /** Null when the entry has no project. */
+  projectId: string | null;
+  actorId: string;
+  action: AuditAction;
+  fromStatus: ProjectStatus | null;
+  toStatus: ProjectStatus | null;
+  /** JSON text stored with the entry. */
+  details: string | null;
+  createdAt: string;
+}
+
+/** Query parameters of GET /api/audit. All optional; from and to are inclusive instants, size is at most 100. */
+export interface AuditQueryParams {
+  projectId?: string;
+  actorId?: string;
+  action?: AuditAction;
+  from?: string;
+  to?: string;
+  page?: number;
+  size?: number;
+}
+
+/** Body of GET /api/audit: one page of the audit log, newest first. */
+export interface AuditPageResponse {
+  content: AuditLogResponse[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+}
+
 export interface ProjectDetailResponse {
   id: string;
   title: string;

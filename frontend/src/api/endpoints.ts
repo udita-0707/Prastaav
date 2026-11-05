@@ -1,5 +1,7 @@
 import { api } from './client';
 import type {
+  AuditPageResponse,
+  AuditQueryParams,
   AuthResponse,
   CreateProjectRequest,
   DashboardSummaryResponse,
@@ -27,6 +29,11 @@ export const register = (name: string, email: string, password: string) =>
 
 export const listFaculty = () =>
   api.get<UserResponse[]>('/users', { params: { role: 'FACULTY' } }).then((r) => r.data);
+
+export const listUsers = () => api.get<UserResponse[]>('/users').then((r) => r.data);
+
+export const listAuditLog = (params: AuditQueryParams) =>
+  api.get<AuditPageResponse>('/audit', { params }).then((r) => r.data);
 
 export const listProjects = ({ status, ...rest }: ProjectListParams = {}) =>
   api

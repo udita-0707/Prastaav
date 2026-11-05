@@ -1,4 +1,4 @@
-import type { ProjectStatus, ProposalContent, ReviewDecision, Role, TimelineEntryType } from '../api/types';
+import type { AuditAction, ProjectStatus, ProposalContent, ReviewDecision, Role, TimelineEntryType } from '../api/types';
 
 export const STATUS_LABEL: Record<ProjectStatus, string> = {
   DRAFT: 'Draft',
@@ -19,6 +19,17 @@ export const TIMELINE_TYPE_LABEL: Record<TimelineEntryType, string> = {
   VERSION_CREATED: 'Version',
   STATUS_CHANGED: 'Status change',
   REVIEW: 'Review',
+};
+
+export const AUDIT_ACTION_LABEL: Record<AuditAction, string> = {
+  PROJECT_CREATED: 'Project created',
+  VERSION_CREATED: 'Version created',
+  DRAFT_UPDATED: 'Draft updated',
+  PROPOSAL_SUBMITTED: 'Proposal submitted',
+  REVIEWER_ASSIGNED: 'Reviewer assigned',
+  REVIEWER_REASSIGNED: 'Reviewer reassigned',
+  REVIEW_RECORDED: 'Review recorded',
+  STATUS_CHANGED: 'Status changed',
 };
 
 export const ROLE_LABEL: Record<Role, string> = {
