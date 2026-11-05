@@ -6,7 +6,7 @@ import { errorMessage } from '../api/client';
 import { createProject, getProject, listReviews, submitProject, updateDraft } from '../api/endpoints';
 import type { ProjectDetailResponse, ProposalContent } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
-import { EMPTY_PROPOSAL, ProposalFields, ProposalView, REQUIRED_TO_SUBMIT } from '../components/ProposalFields';
+import { EMPTY_PROPOSAL, isWebLink, ProposalFields, ProposalView, REQUIRED_TO_SUBMIT } from '../components/ProposalFields';
 import { Button, ButtonLink, Card, EmptyState, IconTile, Input, Modal, Skeleton, Stepper, Textarea, useToast } from '../components/ui';
 import { DECISION_LABEL, FIELD_LABEL } from '../components/labels';
 import { formatDateTime, formatTime } from '../lib/format';
@@ -19,6 +19,7 @@ const TITLE_MAX = 100;
 const DESCRIPTION_MAX = 300;
 const TECH_MAX = 500;
 const TEAM_MAX = 10;
+const LINK_STEP = 3;
 
 interface Basics {
   title: string;
@@ -69,13 +70,7 @@ function validateProposal(proposal: ProposalContent, keys: (keyof ProposalConten
   for (const key of keys) {
     const text = proposal[key]?.trim() ?? '';
     if (key === 'referenceLink') {
-      if (text) {
-        try {
-          new URL(text);
-        } catch {
-          errors.referenceLink = 'Enter a full link starting with https://';
-        }
-      }
+      if (text && !isWebLink(text)) errors.referenceLink = 'Enter a full link starting with https://';
     } else if (REQUIRED_TO_SUBMIT.includes(key) && !text) {
       errors[key] = `${FIELD_LABEL[key]} is needed before you can submit.`;
     }
@@ -153,6 +148,14 @@ export function ProjectWizardPage() {
         if (step !== 0) goToStep(0);
         throw new ClientValidationError('Add a title and a short description on step 1 before saving.');
       }
+    }
+    const linkErrors = validateProposal(proposal, ['referenceLink']);
+    if (Object.keys(linkErrors).length > 0) {
+      if (step !== LINK_STEP) goToStep(LINK_STEP);
+      setErrors(linkErrors);
+      throw new ClientValidationError('Correct the reference link before saving.');
+    }
+    if (!id) {
       const created = await createProject({ ...basics, title: basics.title.trim(), description: basics.description.trim(), proposal: toPayload(proposal) });
       createdId.current = created.id;
       return created.id;

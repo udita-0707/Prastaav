@@ -3199,7 +3199,7 @@ Validation runs in layers, from the request body down to the database.
 | `CreateUserRequest` | as `RegisterRequest`, and role required |
 | `LoginRequest` | email and password required |
 | `CreateProjectRequest` | title required, at most 200; description required, at most 4000; techStack at most 500; teamMembers at most 2000; nested proposal validated |
-| `ProposalContent` | problemStatement, objectives, methodology and expectedOutcome at most 4000 each; timeline at most 2000; referenceLink at most 500 |
+| `ProposalContent` | problemStatement, objectives, methodology and expectedOutcome at most 4000 each; timeline at most 2000; referenceLink at most 500 and either blank or a full `http://` or `https://` link |
 | `AssignReviewerRequest` | facultyId required |
 | `ReviewRequest` | decision required; comments at most 4000 |
 

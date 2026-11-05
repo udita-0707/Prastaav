@@ -18,6 +18,11 @@ export const PROPOSAL_MAX: Record<ProposalKey, number> = {
 /** Every field except the reference link is needed before a version can be submitted. */
 export const REQUIRED_TO_SUBMIT: ProposalKey[] = ['problemStatement', 'objectives', 'methodology', 'expectedOutcome', 'timeline'];
 
+/** Only web links are accepted and only web links are ever made clickable, so a stored value cannot run script. */
+export function isWebLink(text: string): boolean {
+  return /^https?:\/\/\S+$/i.test(text);
+}
+
 const PLACEHOLDER: Record<ProposalKey, string> = {
   problemStatement: 'What problem does the project solve, and for whom?',
   objectives: 'What will the project achieve? List measurable objectives.',
@@ -100,10 +105,14 @@ export function ProposalView({ value }: { value: ProposalContent }) {
         <div className="grid gap-1 py-4 sm:grid-cols-[12rem_1fr] sm:gap-6">
           <dt className="text-sm font-semibold text-ink">{FIELD_LABEL.referenceLink}</dt>
           <dd className="min-w-0 text-sm">
-            <a href={value.referenceLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 break-all font-medium text-accent-700 hover:underline">
-              {value.referenceLink}
-              <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            </a>
+            {isWebLink(value.referenceLink) ? (
+              <a href={value.referenceLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 break-all font-medium text-accent-700 hover:underline">
+                {value.referenceLink}
+                <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              </a>
+            ) : (
+              <span className="break-all text-slate-700">{value.referenceLink}</span>
+            )}
           </dd>
         </div>
       )}
