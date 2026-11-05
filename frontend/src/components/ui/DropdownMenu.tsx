@@ -44,26 +44,29 @@ export function DropdownMenu({ items, label, trigger, align = 'right', triggerCl
       const target = event.target as Node;
       if (!root.current?.contains(target) && !menu.current?.contains(target)) setOpen(false);
     };
-    const dismiss = () => setOpen(false);
     document.addEventListener('pointerdown', onPointer);
-    window.addEventListener('scroll', dismiss, true);
-    window.addEventListener('resize', dismiss);
-    return () => {
-      document.removeEventListener('pointerdown', onPointer);
-      window.removeEventListener('scroll', dismiss, true);
-      window.removeEventListener('resize', dismiss);
-    };
+    return () => document.removeEventListener('pointerdown', onPointer);
   }, [open]);
 
-  // Below the trigger when it fits, otherwise above it; always inside the viewport.
+  // Below the trigger when it fits, otherwise above it; always inside the viewport, and it follows the trigger on scroll.
   useLayoutEffect(() => {
-    if (!open || !button.current || !menu.current) return;
-    const anchor = button.current.getBoundingClientRect();
-    const { width, height } = menu.current.getBoundingClientRect();
-    const below = anchor.bottom + VIEWPORT_GAP;
-    const top = below + height > window.innerHeight ? Math.max(VIEWPORT_GAP, anchor.top - VIEWPORT_GAP - height) : below;
-    const wanted = align === 'right' ? anchor.right - width : anchor.left;
-    setPosition({ top, left: Math.min(Math.max(VIEWPORT_GAP, wanted), window.innerWidth - width - VIEWPORT_GAP) });
+    if (!open) return;
+    const place = () => {
+      if (!button.current || !menu.current) return;
+      const anchor = button.current.getBoundingClientRect();
+      const { width, height } = menu.current.getBoundingClientRect();
+      const below = anchor.bottom + VIEWPORT_GAP;
+      const top = below + height > window.innerHeight ? Math.max(VIEWPORT_GAP, anchor.top - VIEWPORT_GAP - height) : below;
+      const wanted = align === 'right' ? anchor.right - width : anchor.left;
+      setPosition({ top, left: Math.min(Math.max(VIEWPORT_GAP, wanted), window.innerWidth - width - VIEWPORT_GAP) });
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('scroll', place, true);
+      window.removeEventListener('resize', place);
+    };
   }, [open, align]);
 
   useEffect(() => {
