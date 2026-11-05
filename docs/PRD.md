@@ -52,7 +52,7 @@ Product decisions: one assigned faculty reviewer per project; a REJECTED project
 | FR-13 | Notifications on reviewer assignment (to the faculty member), review decision (to the student owner) and resubmission (to the faculty member), sent only after the change commits and delivered through the configured channels (in-app inbox; email written to the log), each retried a configured number of times. Every user reads only their own inbox: paged list with an unread filter (page from 0, size 1 to 50, default 10), unread count, mark one or all as read; another user's notification is `FORBIDDEN` |
 | FR-14 | Compare two proposal versions of one project field by field: every proposal field with its value in each version and whether it changed, shown side by side on the Compare tab of the project page with changed fields highlighted; project participants only; a version outside the project is `NOT_FOUND`, the same version on both sides is `VALIDATION_FAILED` |
 | FR-15 | Coordinator dashboard (`GET /api/dashboard/summary`, coordinator only; other roles get `FORBIDDEN`): counts of all projects by status with every status present, the list of SUBMITTED projects that have no reviewer yet (oldest first, with owner and waiting-since time) and the reviewer workload, meaning the number of projects UNDER\_REVIEW per faculty member, including faculty with none. Counts are computed by grouped database queries, never by loading projects into memory |
-| FR-16 | Coordinator audit-log viewer with filters |
+| FR-16 | Coordinator audit log (`GET /api/audit`, coordinator only; other roles get `FORBIDDEN`): paged, newest first, filterable by project, actor, action and date range (from and to, both inclusive), with the filters combining with AND. A `from` after `to` or a page size outside 1 to 100 is `VALIDATION_FAILED` |
 | FR-17 | Coordinator reassigns the reviewer of an UNDER\_REVIEW project to another FACULTY member; the status stays UNDER\_REVIEW; any other status is `ILLEGAL_TRANSITION`; a non-faculty or unchanged reviewer is `VALIDATION_FAILED`; an audit entry (`REVIEWER_REASSIGNED`) is written and both the previous and the new reviewer are notified |
 | FR-18 | Institution profile and email policy: every account uses the institutional domain (`nst.rishihood.edu.in`, configured in `application.yml`); self-registration creates STUDENT accounts only and requires `<firstname>.<YY><branch>@domain`, from which admission year (2000 + YY) and branch are stored; FACULTY and COORDINATOR accounts are created by the coordinator (`POST /api/users`) or the seed; any other email or role is rejected with `VALIDATION_FAILED` |
 
@@ -197,7 +197,7 @@ public class DraftState implements ProjectState {
 | Factory | `ProjectStateFactory`, `ProposalVersionFactory` (new version from previous) | Centralized object creation |
 | Strategy | `ReviewDecisionHandler` per decision (Approve/Revise/Reject); `EmailPolicy` / `PatternEmailPolicy` for account emails; `NotificationChannel` (in-app, email log) run by `NotificationDispatcher` | Add behaviour without modifying services |
 | Decorator | `RetryingNotificationChannel` around every enabled `NotificationChannel` | Retries without changing any channel |
-| Specification | `ProjectSpecifications` (role scope, status, reviewer, search) | One composable query for every list filter |
+| Specification | `ProjectSpecifications` (role scope, status, reviewer, search), `AuditSpecifications` (project, actor, action, date range) | One composable query for every list filter |
 | Facade | `WorkflowService` | One simple API over state, repository, events |
 | Repository | Spring Data JPA | Persistence abstraction |
 | Builder | `AuditLog.builder()` | Readable construction of multi-field objects |
@@ -226,6 +226,7 @@ Base path `/api`. All except auth require `Authorization: Bearer <jwt>`.
 | GET | /projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size= | any | Role-scoped list with status filter, search, batch filter (coordinator only), sort and paging; returns `{ content, page, size, totalElements, totalPages }` |
 | GET | /projects/summary | any | Role-scoped counts by status; projects awaiting assignment for the coordinator |
 | GET | /dashboard/summary | COORDINATOR | Counts by status, projects awaiting assignment, reviewer workload (FR-15) |
+| GET | /audit?projectId=&actorId=&action=&from=&to=&page=&size= | COORDINATOR | Paged audit log, newest first, with optional filters (FR-16); returns `{ content, page, size, totalElements, totalPages }` |
 | GET | /projects/{id} | owner/reviewer/coordinator | Project detail + current status |
 | PUT | /projects/{id}/proposal | STUDENT (owner) | Edit current draft version |
 | POST | /projects/{id}/proposals | STUDENT (owner) | Create next version draft (only in REVISION\_REQUESTED) |

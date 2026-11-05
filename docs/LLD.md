@@ -58,19 +58,20 @@ AI proposal analysis, ML risk prediction, GitHub integration, an external event 
 | FR-17 | Coordinator reassigns the reviewer of an UNDER_REVIEW project (status unchanged); the new reviewer must be FACULTY and differ from the current one; any other status is ILLEGAL_TRANSITION; audited and both reviewers notified | `PUT /api/projects/{id}/assign`, `WorkflowService.reassignReviewer`, `UnderReviewState.reassignReviewer`, `ReviewerReassignedEvent`, `AuditEventListener` (`REVIEWER_REASSIGNED`), `NotificationListener`, `V5__notification_reviewer_unassigned.sql` |
 | FR-14 | Compare two proposal versions field by field | `ProposalDiffService`, `ProposalDiff`, `FieldDiff`, `ProposalVersionRepository.findByProject_IdAndVersionNumber`, `GET /api/projects/{id}/proposals/compare?from=&to=`, Compare tab of the project page (`VersionCompare`) |
 | FR-15 | Role dashboards: counts per status and projects awaiting assignment; coordinator dashboard with counts by status, the list of submitted projects without a reviewer and the open reviews of every faculty member, computed by grouped queries | `ProjectService.countProjects`, `GET /api/projects/summary`, `DashboardService`, `ProjectRepository.findAwaitingAssignment`, `ProjectRepository.reviewerWorkload`, `DashboardController`, `GET /api/dashboard/summary`, web app home pages |
+| FR-16 | Coordinator audit log: paged, newest first, filterable by project, actor, action and date range | `AuditQueryService.search`, `AuditQuery`, `AuditSpecifications`, `AuditController`, `GET /api/audit`, `V6__audit_query_indexes.sql` |
 | FR-18 | Institution profile and email policy: institutional domain for every account; student-only registration with `<firstname>.<YY><branch>@domain`, storing admission year and branch; staff accounts created by the coordinator | `InstitutionProperties`, `EmailPolicy`, `PatternEmailPolicy`, `AuthService.register`, `UserService.createAccount`, `POST /api/users`, `V3__user_institution_profile.sql` |
 
 ### 2.2 Engineering items
 
 | Item | Evidence |
 |---|---|
-| Flyway schema with constraints and triggers | `backend/src/main/resources/db/migration/V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`, `V5__notification_reviewer_unassigned.sql` |
+| Flyway schema with constraints and triggers | `backend/src/main/resources/db/migration/V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`, `V5__notification_reviewer_unassigned.sql`, `V6__audit_query_indexes.sql` |
 | Seed data (1 coordinator, 2 faculty, 3 students on `nst.rishihood.edu.in`, one shared `prastav.seed.demo-password`) | `DemoDataSeeder` |
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment, coordinator dashboard | 207 tests in `backend/src/test/java` (see section 16) |
-| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, coordinator dashboard, account creation, notification inbox) | `ProjectControllerWebTest` (20 tests), `DashboardControllerWebTest` (4 tests), `ProposalControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests), `NotificationControllerWebTest` (12 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment, coordinator dashboard, audit query | 246 tests in `backend/src/test/java` (see section 16) |
+| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, coordinator dashboard, account creation, notification inbox, audit log) | `ProjectControllerWebTest` (20 tests), `DashboardControllerWebTest` (4 tests), `ProposalControllerWebTest` (6 tests), `UserControllerWebTest` (4 tests), `NotificationControllerWebTest` (12 tests), `AuditControllerWebTest` (20 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
 
@@ -97,7 +98,7 @@ workflow  -> project (ProjectStore), proposal (ProposalService), auth (UserServi
 proposal  -> project (ProjectStore, ProjectAccessPolicy), workflow (ProjectStateFactory)
 review    -> workflow (WorkflowService via handlers), proposal, project, auth
 project   -> proposal (ProposalService), workflow (AllowedActionsResolver), auth, audit (history read)
-audit     -> listens to events from project, proposal, workflow, review
+audit     -> auth (Actor); listens to events from project, proposal, workflow, review
 notification -> project (ProjectStore), auth; listens to events from workflow, review
 ```
 
@@ -149,7 +150,8 @@ com.prastav
 │              ReviewRecordedEvent
 │  └─ web      ReviewController, ReviewRequest, ReviewResponse, ReviewMapper
 ├─ audit       AuditLog, AuditAction, AuditLogRepository, AuditRecorder, JpaAuditRecorder,
-│              AuditEventListener, AuditQueryService
+│              AuditEventListener, AuditQueryService, AuditQuery, AuditSpecifications
+│  └─ web      AuditController, AuditLogResponse, AuditPageResponse, AuditMapper
 └─ notification Notification, NotificationType, NotificationRepository, NotificationService,
                NotificationChannel, InAppNotificationChannel, EmailNotificationChannel,
                NotificationDispatcher, NotificationProperties, RetryingNotificationChannel,
@@ -1924,12 +1926,26 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Methods:**
 
 - `List<AuditLog> findByProjectIdOrderByCreatedAtAsc(UUID projectId)`
+- inherited `Page<AuditLog> findAll(Specification<AuditLog> spec, Pageable pageable)`
+
+#### `AuditQuery`
+
+*record* · `src/main/java/com/prastav/audit/AuditQuery.java`
+
+**Responsibility.** Filters and paging for the coordinator's audit log. Filters are optional and combine with AND; from and to are both inclusive. A from after to, a negative page or a size outside 1..100 is rejected with VALIDATION_FAILED instead of being silently corrected.
+
+**Components:** `UUID projectId, UUID actorId, AuditAction action, Instant from, Instant to, int page, int size`
+
+**Methods:**
+
+- `public static AuditQuery of(UUID projectId, UUID actorId, AuditAction action, Instant from, Instant to, Integer page, Integer size)`: page 0 and 20 rows unless given
+- `public Pageable pageable()`: newest first (`createdAt` descending, then `id` descending so the order is stable across pages)
 
 #### `AuditQueryService`
 
 *class* · @Service · `src/main/java/com/prastav/audit/AuditQueryService.java`
 
-**Responsibility.** Read side of the audit module, used by the project history timeline.
+**Responsibility.** Read side of the audit module, used by the project history timeline and the coordinator's audit log.
 
 | Field | Type | Visibility |
 |---|---|---|
@@ -1939,6 +1955,7 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 
 - `public AuditQueryService(AuditLogRepository auditLogRepository)`
 - `public List<AuditLog> findByProject(UUID projectId)`
+- `public Page<AuditLog> search(AuditQuery query, Actor actor)`: one page matching the filters, newest first; any role but COORDINATOR gets `ForbiddenException` before any read
 
 #### `AuditRecorder`
 
@@ -1949,6 +1966,21 @@ Generated from `backend/src/main/java` (122 classes). Private helper methods are
 **Methods:**
 
 - `void record(AuditLog entry)`
+
+#### `AuditSpecifications`
+
+*final class* · `src/main/java/com/prastav/audit/AuditSpecifications.java`
+
+**Responsibility.** Specification pattern: the audit log query is built from small, composable criteria (project, actor, action, date range) instead of one repository method per combination of filters. A missing value matches everything.
+
+**Methods:**
+
+- `public static Specification<AuditLog> forProject(UUID projectId)`
+- `public static Specification<AuditLog> byActor(UUID actorId)`
+- `public static Specification<AuditLog> withAction(AuditAction action)`
+- `public static Specification<AuditLog> createdFrom(Instant from)`
+- `public static Specification<AuditLog> createdUntil(Instant to)`
+- `public static Specification<AuditLog> forQuery(AuditQuery auditQuery)`
 
 #### `JpaAuditRecorder`
 
@@ -2205,9 +2237,53 @@ Nested record `NotificationProperties.Retry`: `@Min(1) int maxAttempts, @NotNull
 
 **Components:** `long count`
 
+### 8.15 Package `com.prastav.audit.web`
+
+#### `AuditController`
+
+*class* · @RestController · `src/main/java/com/prastav/audit/web/AuditController.java`
+
+**Responsibility.** Coordinator audit log endpoint. HTTP only.
+
+| Field | Type | Visibility |
+|---|---|---|
+| `auditQueryService` | `AuditQueryService` | private |
+
+**Methods:**
+
+- `public AuditController(AuditQueryService auditQueryService)`
+- `public AuditPageResponse search(UUID projectId, UUID actorId, AuditAction action, Instant from, Instant to, Integer page, Integer size, Actor actor)`: `GET /api/audit`, COORDINATOR only
+
+#### `AuditLogResponse`
+
+*record* · `src/main/java/com/prastav/audit/web/AuditLogResponse.java`
+
+**Responsibility.** One audit entry. projectId, fromStatus, toStatus and details may be null.
+
+**Components:** `UUID id, UUID projectId, UUID actorId, AuditAction action, ProjectStatus fromStatus, ProjectStatus toStatus, String details, Instant createdAt`
+
+#### `AuditMapper`
+
+*final class* · `src/main/java/com/prastav/audit/web/AuditMapper.java`
+
+**Responsibility.** DTO mapper for audit entries.
+
+**Methods:**
+
+- `public static AuditLogResponse toResponse(AuditLog log)`
+- `public static AuditPageResponse toPage(Page<AuditLog> page)`
+
+#### `AuditPageResponse`
+
+*record* · `src/main/java/com/prastav/audit/web/AuditPageResponse.java`
+
+**Responsibility.** One page of the audit log: the rows plus the paging numbers the UI needs to draw its pager.
+
+**Components:** `List<AuditLogResponse> content, int page, int size, long totalElements, int totalPages`
+
 ## 9. Database schema
 
-Owned by Flyway (`V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`, `V5__notification_reviewer_unassigned.sql`); Hibernate runs with `ddl-auto: none`. All ids are application-generated UUIDs; all timestamps are `TIMESTAMPTZ` stored in UTC.
+Owned by Flyway (`V1__init.sql`, `V2__project_list_indexes.sql`, `V3__user_institution_profile.sql`, `V4__notifications.sql`, `V5__notification_reviewer_unassigned.sql`, `V6__audit_query_indexes.sql`); Hibernate runs with `ddl-auto: none`. All ids are application-generated UUIDs; all timestamps are `TIMESTAMPTZ` stored in UTC.
 
 ![ER diagram](uml/png/10_er.png)
 
@@ -2279,7 +2355,9 @@ Extra integrity: partial unique index `ux_proposal_one_open_draft` on (project_i
 | action | VARCHAR(40) | NOT NULL (`AuditAction`) |
 | from_status, to_status | VARCHAR(30) | nullable |
 | details | TEXT | JSON text |
-| created_at | TIMESTAMPTZ | NOT NULL; index (project_id, created_at) |
+| created_at | TIMESTAMPTZ | NOT NULL |
+
+Indexes: `idx_audit_logs_project` (project_id, created_at) for the project timeline and the `projectId` filter; `idx_audit_logs_actor` (actor_id, created_at) and `idx_audit_logs_action` (action, created_at) for those filters in newest-first order; `idx_audit_logs_created_at` (created_at) for the unfiltered log and the date range.
 
 Trigger `trg_audit_logs_append_only` rejects UPDATE and DELETE.
 
@@ -2314,7 +2392,10 @@ Every index in the schema besides the primary keys. Each one serves a column tha
 | proposal_versions | `uq_proposal_project_version` (constraint) | (project_id, version_number) | `V1__init.sql` | sequential version numbers; versions of one project |
 | proposal_versions | `ux_proposal_one_open_draft` (partial, unique) | project_id WHERE state = 'DRAFT' | `V1__init.sql` | business rule 7: one open draft per project |
 | reviews | `idx_reviews_project` | project_id | `V1__init.sql` | review history of a project |
-| audit_logs | `idx_audit_logs_project` | (project_id, created_at) | `V1__init.sql` | project timeline in time order |
+| audit_logs | `idx_audit_logs_project` | (project_id, created_at) | `V1__init.sql` | project timeline in time order, `projectId` filter of the audit log |
+| audit_logs | `idx_audit_logs_actor` | (actor_id, created_at) | `V6__audit_query_indexes.sql` | `actorId` filter of the audit log, newest first |
+| audit_logs | `idx_audit_logs_action` | (action, created_at) | `V6__audit_query_indexes.sql` | `action` filter of the audit log, newest first |
+| audit_logs | `idx_audit_logs_created_at` | created_at | `V6__audit_query_indexes.sql` | unfiltered audit log order, `from` and `to` range |
 | notifications | `idx_notifications_recipient_read` | (recipient_id, is_read) | `V4__notifications.sql` | unread count and unread filter |
 | notifications | `idx_notifications_recipient_created` | (recipient_id, created_at) | `V4__notifications.sql` | newest-first inbox |
 
@@ -2333,6 +2414,7 @@ Base path `/api`. All endpoints except register, login and Swagger need `Authori
 | GET | /projects?status=&q=&reviewerId=&admissionYear=&branch=&sort=&page=&size= | any | Role-scoped, paged list with optional filters, search and sort (section 10.7) | 200 `ProjectPageResponse` |
 | GET | /projects/summary | any | Role-scoped counts by status for the dashboards | 200 `ProjectCountsResponse` |
 | GET | /dashboard/summary | COORDINATOR | Counts by status, projects awaiting assignment, reviewer workload (section 10.9) | 200 `DashboardSummaryResponse` |
+| GET | /audit?projectId=&actorId=&action=&from=&to=&page=&size= | COORDINATOR | Paged audit log, newest first, with optional filters (section 10.10) | 200 `AuditPageResponse` |
 | GET | /projects/{id} | participant | Detail with `allowedActions` | 200 `ProjectDetailResponse` |
 | PUT | /projects/{id}/proposal | STUDENT owner | Edit open draft | 200 `ProposalVersionResponse` |
 | POST | /projects/{id}/proposals | STUDENT owner | Create next version (REVISION_REQUESTED only) | 201 `ProposalVersionResponse` |
@@ -2680,6 +2762,48 @@ Without a token every notification endpoint returns 401 `UNAUTHENTICATED`.
 }
 ```
 
+### 10.10 Audit log
+
+`GET /api/audit` is for the coordinator only: a student or faculty member gets 403 `FORBIDDEN` and a call without a token 401 `UNAUTHENTICATED`. The role is checked on the controller and again in `AuditQueryService.search`. Entries are ordered newest first, with the id as a tie-break so paging stays stable.
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `projectId` | UUID | Entries of this project |
+| `actorId` | UUID | Entries written for this user's actions |
+| `action` | `AuditAction` | Entries with this action |
+| `from` | ISO-8601 instant | `createdAt` at or after this time |
+| `to` | ISO-8601 instant | `createdAt` at or before this time |
+| `page` | integer | Zero-based page index, default 0 |
+| `size` | integer | Page size, 1 to 100, default 20 |
+
+Every filter is optional and they combine with AND. A filter matching nothing, including an unknown `projectId` or `actorId`, returns an empty page rather than 404.
+
+`GET /api/audit?action=REVIEWER_ASSIGNED&from=2026-10-01T00:00:00Z&to=2026-10-31T23:59:59Z&page=0&size=20`
+
+```json
+{
+  "content": [
+    { "id": "316f251f-...", "projectId": "d9eb4c9a-...", "actorId": "e713f727-...", "action": "REVIEWER_ASSIGNED",
+      "fromStatus": "SUBMITTED", "toStatus": "UNDER_REVIEW",
+      "details": "{\"reviewerName\":\"Dr. Anita Rao\",\"reviewerId\":\"a1b2c3d4-...\"}",
+      "createdAt": "2026-10-19T09:41:07.512Z" }
+  ],
+  "page": 0,
+  "size": 20,
+  "totalElements": 1,
+  "totalPages": 1
+}
+```
+
+`details` is the JSON text stored in the entry, returned as a string. `projectId`, `fromStatus`, `toStatus` and `details` may be null.
+
+Errors: a malformed UUID, unknown `action`, unparseable `from` or `to`, negative `page`, `size` outside 1 to 100, or `from` after `to` is 400 `VALIDATION_FAILED`:
+
+```json
+{ "timestamp": "2026-10-19T09:45:00.120Z", "status": 400, "code": "VALIDATION_FAILED",
+  "message": "from must not be after to", "path": "/api/audit", "fieldErrors": [] }
+```
+
 ## 11. Validation and error codes
 
 `ApiError`: `{ timestamp, status, code, message, path, fieldErrors[] }` with `fieldErrors` items `{ field, message }`.
@@ -2721,7 +2845,7 @@ Bean Validation limits: title 200, description 4000, techStack 500, teamMembers 
 | Observer | `ProjectCreatedEvent`, `ProposalVersionCreatedEvent`, `ProposalDraftUpdatedEvent`, `ProjectStatusChangedEvent`, `ReviewerReassignedEvent`, `ReviewRecordedEvent` consumed by `AuditEventListener`; `ProjectStatusChangedEvent`, `ReviewerReassignedEvent` and `ReviewRecordedEvent` also consumed by `NotificationListener` | Side effects (audit, notifications) decoupled from the workflow; a new side effect is a new listener |
 | Strategy | `ReviewDecisionHandler` + `ApproveDecisionHandler`, `RequestRevisionDecisionHandler`, `RejectDecisionHandler`; `EmailPolicy` + `PatternEmailPolicy` (institution email rules, swappable per institution); `NotificationChannel` + `InAppNotificationChannel`, `EmailNotificationChannel` chosen by `NotificationDispatcher` from configuration | Add a decision, an email rule or a delivery channel by adding a class |
 | Decorator | `RetryingNotificationChannel` wrapping every `NotificationChannel` enabled in `NotificationDispatcher` | Retry is added around any channel without changing the channel or the dispatcher, and every channel is retried the same way |
-| Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects` | One composable query for every list filter instead of a repository method per combination |
+| Specification | `ProjectSpecifications` (role scope, status, reviewer, text search) combined by `ProjectService.listProjects`; `AuditSpecifications` (project, actor, action, date range) combined by `AuditQueryService.search` | One composable query for every list filter instead of a repository method per combination |
 | Repository | `UserRepository`, `ProjectRepository`, `ProposalVersionRepository`, `ReviewRepository`, `AuditLogRepository`, `NotificationRepository` | Persistence abstraction (Spring Data JPA) |
 | Builder | `AuditLog.builder()` / `AuditLog.Builder` | Readable construction with optional fields |
 | DTO + Mapper | `*Request`/`*Response` records, `UserMapper`, `ProjectMapper`, `DashboardMapper`, `ProposalMapper`, `ReviewMapper`, `NotificationMapper` | Entities never leave the service layer as JSON |
@@ -2786,6 +2910,10 @@ The frontend has no automated tests. The JWT is kept in browser storage. Docker 
 | `ProjectListQueryTest` | defaults (page 0, size 10, LATEST), trimming, size bounds 1 and 50 accepted, negative page and size 0 or 51 rejected with `ValidationException`, branch trimmed and upper-cased, blank branch is no filter, LIKE wildcard escaping |
 | `ProjectSpecificationsTest` | role scope (student by owner, faculty by reviewer, coordinator everything), empty filters match everything, owner cohort by admission year and branch (a missing value leaves that column open), a student query combines owner scope, status and lower-case search over five columns |
 | `AuditEventListenerTest` | status change becomes an audit row with before/after and JSON details; reassignment becomes REVIEWER_REASSIGNED with both reviewer ids and no status; action mapping |
+| `AuditQueryTest` | defaults (page 0, size 20, newest first with the id as tie-break), size bounds 1 and 100 accepted, negative page and size 0 or 101 rejected, `from` after `to` rejected, open-ended and single-instant ranges accepted |
+| `AuditSpecificationsTest` | project, actor and action filters each constrain their own column; `from` and `to` are inclusive bounds on `createdAt`; a missing value matches everything; all filters combined |
+| `AuditQueryServiceTest` | the coordinator gets the repository's page with the requested paging, newest first; student and faculty 403 without touching the repository; the project timeline read |
+| `AuditControllerWebTest` (MockMvc, `@WebMvcTest`) | page envelope with every field; no parameters means no filters and default paging; each filter bound; combined filters and paging; invalid page, size, UUIDs, action and dates 400 without reading the log; reversed range 400; student and faculty 403; 401 without token |
 | `PatternEmailPolicyTest` | valid student email parsed to year and branch; uppercase input normalized; wrong domain, missing or malformed year or branch rejected; faculty email institutional but not a student email |
 | `InstitutionConfigTest` | the shipped `application.yml` binds `InstitutionProperties` and parses a demo student email |
 | `AuthServiceTest` | student registration stores admission year and branch; omitted role means STUDENT; FACULTY and COORDINATOR, faculty-style email, other domain and duplicate email rejected |

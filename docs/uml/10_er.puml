@@ -88,6 +88,9 @@ entity audit_logs {
   trigger: append-only
   --
   idx_audit_logs_project (project_id, created_at)
+  idx_audit_logs_actor (actor_id, created_at)
+  idx_audit_logs_action (action, created_at)
+  idx_audit_logs_created_at (created_at)
 }
 
 entity notifications {

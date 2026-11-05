@@ -23,6 +23,7 @@ rectangle "Prastav" {
   usecase "Create faculty or coordinator account" as UC13
   usecase "Read and mark own notifications" as UC14
   usecase "View coordinator dashboard\n(awaiting assignment, reviewer workload)" as UC15
+  usecase "Query audit log\n(project, actor, action, date range)" as UC16
 }
 
 Student --> UC1
@@ -51,4 +52,5 @@ Student --> UC14
 Faculty --> UC14
 Coordinator --> UC14
 Coordinator --> UC15
+Coordinator --> UC16
 @enduml

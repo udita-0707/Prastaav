@@ -26,9 +26,10 @@ flowchart LR
   UC13["Create faculty or coordinator account"]
   UC14["Read and mark own notifications"]
   UC15["View coordinator dashboard (awaiting assignment, reviewer workload)"]
+  UC16["Query audit log (project, actor, action, date range)"]
   Student --> UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC9 & UC11 & UC12 & UC14
   Faculty --> UC1 & UC8 & UC5 & UC11 & UC12 & UC14
-  Coordinator --> UC1 & UC7 & UC10 & UC9 & UC11 & UC12 & UC13 & UC14 & UC15
+  Coordinator --> UC1 & UC7 & UC10 & UC9 & UC11 & UC12 & UC13 & UC14 & UC15 & UC16
 ```
 
 ## 2. Domain class diagram
@@ -527,12 +528,12 @@ erDiagram
   audit_logs {
     UUID id PK
     UUID project_id FK "idx_audit_logs_project with created_at"
-    UUID actor_id FK
-    VARCHAR action
+    UUID actor_id FK "idx_audit_logs_actor with created_at"
+    VARCHAR action "idx_audit_logs_action with created_at"
     VARCHAR from_status
     VARCHAR to_status
     TEXT details
-    TIMESTAMPTZ created_at
+    TIMESTAMPTZ created_at "idx_audit_logs_created_at"
   }
   notifications {
     UUID id PK
