@@ -70,7 +70,9 @@ export function useProjectListParams(defaults: Defaults = {}) {
   // Several updates can land before the router renders again (Clear filters, two search boxes settling together),
   // so each one builds on the previous update and not on the params of the last render.
   const latest = useRef(searchParams);
-  latest.current = searchParams;
+  useEffect(() => {
+    latest.current = searchParams;
+  }, [searchParams]);
   const update: Update = (patch) => {
     const next = new URLSearchParams(latest.current);
     for (const [key, value] of Object.entries(patch)) {
