@@ -7,23 +7,24 @@ actor Faculty
 actor Coordinator
 
 rectangle "Prastav" {
-  usecase "Register / log in (JWT)" as UC1
-  usecase "Create project with draft v1" as UC2
-  usecase "Edit own draft" as UC3
-  usecase "Submit / resubmit proposal" as UC4
-  usecase "View feedback and history" as UC5
+  usecase "Log in (JWT)" as UC1
+  usecase "Register with an institutional student email" as UC2
+  usecase "Create project with draft v1" as UC3
+  usecase "Edit own draft" as UC4
+  usecase "Submit / resubmit proposal" as UC5
   usecase "Create revision vN+1" as UC6
-  usecase "Assign or reassign faculty reviewer" as UC7
-  usecase "Review latest submitted version\n(approve / request revision / reject)" as UC8
-  usecase "View project timeline" as UC9
-  usecase "View all projects" as UC10
-
-  usecase "Filter, search and page project lists" as UC11
-  usecase "View dashboard counts by status" as UC12
-  usecase "Create faculty or coordinator account" as UC13
-  usecase "Read and mark own notifications" as UC14
-  usecase "View coordinator dashboard\n(awaiting assignment, reviewer workload)" as UC15
-  usecase "Query audit log\n(project, actor, action, date range)" as UC16
+  usecase "View feedback and reviews" as UC7
+  usecase "View project timeline" as UC8
+  usecase "Compare two proposal versions" as UC9
+  usecase "Assign or reassign faculty reviewer" as UC10
+  usecase "Review latest submitted version\n(approve / request revision / reject)" as UC11
+  usecase "View all projects" as UC12
+  usecase "Filter, search and page project lists" as UC13
+  usecase "View dashboard counts by status" as UC14
+  usecase "Create faculty or coordinator account" as UC15
+  usecase "Read and mark own notifications" as UC16
+  usecase "View coordinator dashboard\n(awaiting assignment, reviewer workload)" as UC17
+  usecase "Query audit log\n(project, actor, action, date range)" as UC18
 }
 
 Student --> UC1
@@ -32,25 +33,30 @@ Student --> UC3
 Student --> UC4
 Student --> UC5
 Student --> UC6
+Student --> UC7
+Student --> UC8
 Student --> UC9
+Student --> UC13
+Student --> UC14
+Student --> UC16
 Faculty --> UC1
+Faculty --> UC7
 Faculty --> UC8
-Faculty --> UC5
+Faculty --> UC9
+Faculty --> UC11
+Faculty --> UC13
+Faculty --> UC14
+Faculty --> UC16
 Coordinator --> UC1
 Coordinator --> UC7
-Coordinator --> UC10
+Coordinator --> UC8
 Coordinator --> UC9
-
-Student --> UC11
-Faculty --> UC11
-Coordinator --> UC11
-Student --> UC12
-Faculty --> UC12
+Coordinator --> UC10
 Coordinator --> UC12
 Coordinator --> UC13
-Student --> UC14
-Faculty --> UC14
 Coordinator --> UC14
 Coordinator --> UC15
 Coordinator --> UC16
+Coordinator --> UC17
+Coordinator --> UC18
 @enduml
