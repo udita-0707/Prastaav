@@ -267,6 +267,7 @@ Vite, React Router, TanStack Query, Axios (JWT interceptor), Tailwind CSS. Route
 | Project detail (overview, versions, reviews, timeline, action buttons shown by state and role) | all |
 | Reviews (projects under review) | Faculty, Coordinator |
 | Assign faculty | Coordinator |
+| Notifications (whole inbox with paging and mark all read), plus a bell with the latest items in the top bar | all |
 
 Key UI rule: the backend decides what is allowed; the UI only hides buttons based on `allowedActions` returned in the project detail response (computed from state + role).
 
