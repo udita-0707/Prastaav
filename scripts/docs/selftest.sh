@@ -34,7 +34,7 @@ plant() {
 
 plant "unknown class in the docs" check_names.py README.md '1,/WorkflowService/s/WorkflowService/WorkflowServiceX/' WorkflowServiceX
 plant "unknown method" check_names.py docs/LLD.md '1,/`ProjectService.listProjects`/s/`ProjectService.listProjects`/`ProjectService.listAllProjects`/' listAllProjects
-plant "unknown endpoint" check_names.py docs/LLD.md '1,/`GET \/api\/audit`/s/`GET \/api\/audit`/`GET \/api\/audits`/' /api/audits
+plant "unknown endpoint" check_names.py docs/LLD.md '1,/`GET \/api\/audit`/s/`GET \/api\/audit`/`GET \/api\/audits`/' 'GET /audits is not an endpoint'
 plant "unknown schema name" check_names.py docs/PRD.md '1,/project\\_id/s/project\\_id/project\\_key/' project_key
 plant "missing file" check_names.py README.md '1,/`docs\/LLD.md`/s/`docs\/LLD.md`/`docs\/designs\/x.md`/' designs
 plant "code gained an endpoint" check_names.py backend/src/main/java/com/prastav/audit/web/AuditController.java 's/@GetMapping$/@GetMapping("\/all")/' /api/audit/all
