@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, Check, ChevronDown, Code2, FilePlus2, MessageSquareText, RotateCcw, Save, Send, UsersRound } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Link, useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { errorMessage } from '../api/client';
 import { createProject, getProject, listReviews, submitProject, updateDraft } from '../api/endpoints';
@@ -114,6 +114,7 @@ export function ProjectWizardPage() {
   const [feedbackOpen, setFeedbackOpen] = useState(true);
   const loaded = useRef(false);
   const leaving = useRef(false);
+  const createdId = useRef<string | null>(null);
 
   useDocumentTitle(isEdit ? (project.data ? `Edit ${project.data.title}` : 'Edit draft') : 'Create project');
 
@@ -153,6 +154,7 @@ export function ProjectWizardPage() {
         throw new ClientValidationError('Add a title and a short description on step 1 before saving.');
       }
       const created = await createProject({ ...basics, title: basics.title.trim(), description: basics.description.trim(), proposal: toPayload(proposal) });
+      createdId.current = created.id;
       return created.id;
     }
     await updateDraft(id, toPayload(proposal));
@@ -194,7 +196,16 @@ export function ProjectWizardPage() {
       leaving.current = true;
       navigate(`/app/projects/${projectId}`);
     },
-    onError: () => setConfirmSubmit(false),
+    onError: (error) => {
+      setConfirmSubmit(false);
+      // The project exists even though the submit failed: move to its edit page, so trying again cannot create a second one.
+      if (!id && createdId.current) {
+        afterSave(createdId.current);
+        toast.show({ tone: 'error', title: 'Draft saved, but not submitted', description: errorMessage(error) });
+        leaving.current = true;
+        navigate(`/app/projects/${createdId.current}/edit?step=${step + 1}`, { replace: true, state: { savedAt: new Date().toISOString() } });
+      }
+    },
   });
 
   const next = () => {
@@ -246,6 +257,10 @@ export function ProjectWizardPage() {
   }
 
   const canSubmit = !isEdit || Boolean(project.data?.allowedActions.includes('SUBMIT'));
+  // The second click of a double click would land on the next step's button, which is in the same place.
+  const ignoreSecondClick = (event: MouseEvent) => {
+    if (event.detail > 1) event.preventDefault();
+  };
   const versionNumber = draft?.versionNumber ?? 1;
   const latestFeedback = reviews.data?.filter((r) => r.decision === 'REQUEST_REVISION').at(-1);
   const teamCount = parseTeam(basics.teamMembers).length;
@@ -416,12 +431,12 @@ export function ProjectWizardPage() {
                 </Button>
               )}
               {step < STEPS.length - 1 ? (
-                <Button type="submit" disabled={busy} trailingIcon={<ArrowRight className="h-4 w-4" aria-hidden />}>
+                <Button type="submit" disabled={busy} onClick={ignoreSecondClick} trailingIcon={<ArrowRight className="h-4 w-4" aria-hidden />}>
                   Next
                 </Button>
               ) : (
                 canSubmit && (
-                  <Button type="submit" variant="gradient" disabled={busy} icon={<Send className="h-4 w-4" aria-hidden />}>
+                  <Button type="submit" variant="gradient" disabled={busy} onClick={ignoreSecondClick} icon={<Send className="h-4 w-4" aria-hidden />}>
                     {isRevision ? `Resubmit v${versionNumber}` : 'Submit proposal'}
                   </Button>
                 )
