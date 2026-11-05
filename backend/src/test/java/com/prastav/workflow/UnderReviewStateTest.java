@@ -75,6 +75,21 @@ class UnderReviewStateTest {
     }
 
     @Test
+    void afterReassignmentOnlyTheNewReviewerCanDecide() {
+        User newReviewer = TestData.faculty();
+        state.reassignReviewer(project, newReviewer, TestData.actor(TestData.coordinator()));
+
+        assertThrows(ForbiddenException.class, () -> state.approve(project, TestData.actor(reviewer)));
+        assertThrows(ForbiddenException.class,
+                () -> state.requestRevision(project, TestData.actor(reviewer), "Clarify the methodology"));
+        assertThrows(ForbiddenException.class, () -> state.reject(project, TestData.actor(reviewer), "Out of scope"));
+        assertEquals(ProjectStatus.UNDER_REVIEW, project.getStatus());
+
+        state.approve(project, TestData.actor(newReviewer));
+        assertEquals(ProjectStatus.APPROVED, project.getStatus());
+    }
+
+    @Test
     void onlyTheCoordinatorCanReassign() {
         assertThrows(ForbiddenException.class,
                 () -> state.reassignReviewer(project, TestData.faculty(), TestData.actor(reviewer)));
