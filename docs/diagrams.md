@@ -29,25 +29,27 @@ flowchart LR
   Student([Student])
   Faculty([Faculty])
   Coordinator([Coordinator])
-  UC1["Register / log in (JWT)"]
-  UC2["Create project with draft v1"]
-  UC3["Edit own draft"]
-  UC4["Submit / resubmit proposal"]
-  UC5["View feedback and history"]
+  UC1["Log in (JWT)"]
+  UC2["Register with an institutional student email"]
+  UC3["Create project with draft v1"]
+  UC4["Edit own draft"]
+  UC5["Submit / resubmit proposal"]
   UC6["Create revision vN+1"]
-  UC7["Assign or reassign faculty reviewer"]
-  UC8["Review latest submitted version"]
-  UC9["View project timeline"]
-  UC10["View all projects"]
-  UC11["Filter, search and page project lists"]
-  UC12["View dashboard counts by status"]
-  UC13["Create faculty or coordinator account"]
-  UC14["Read and mark own notifications"]
-  UC15["View coordinator dashboard (awaiting assignment, reviewer workload)"]
-  UC16["Query audit log (project, actor, action, date range)"]
-  Student --> UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC9 & UC11 & UC12 & UC14
-  Faculty --> UC1 & UC8 & UC5 & UC11 & UC12 & UC14
-  Coordinator --> UC1 & UC7 & UC10 & UC9 & UC11 & UC12 & UC13 & UC14 & UC15 & UC16
+  UC7["View feedback and reviews"]
+  UC8["View project timeline"]
+  UC9["Compare two proposal versions"]
+  UC10["Assign or reassign faculty reviewer"]
+  UC11["Review latest submitted version<br/>(approve / request revision / reject)"]
+  UC12["View all projects"]
+  UC13["Filter, search and page project lists"]
+  UC14["View dashboard counts by status"]
+  UC15["Create faculty or coordinator account"]
+  UC16["Read and mark own notifications"]
+  UC17["View coordinator dashboard<br/>(awaiting assignment, reviewer workload)"]
+  UC18["Query audit log<br/>(project, actor, action, date range)"]
+  Student --> UC1 & UC2 & UC3 & UC4 & UC5 & UC6 & UC7 & UC8 & UC9 & UC13 & UC14 & UC16
+  Faculty --> UC1 & UC7 & UC8 & UC9 & UC11 & UC13 & UC14 & UC16
+  Coordinator --> UC1 & UC7 & UC8 & UC9 & UC10 & UC12 & UC13 & UC14 & UC15 & UC16 & UC17 & UC18
 ```
 
 ## 2. Domain class diagram
@@ -629,80 +631,81 @@ sequenceDiagram
 
 ```mermaid
 erDiagram
-  users ||--o{ projects : owns
-  users |o--o{ projects : reviews
-  projects ||--|{ proposal_versions : has
-  proposal_versions ||--o{ reviews : "reviewed in"
-  projects ||--o{ reviews : has
-  users ||--o{ reviews : writes
-  projects |o--o{ audit_logs : "logged in"
-  users ||--o{ audit_logs : "acts in"
-  users ||--o{ notifications : receives
-  projects |o--o{ notifications : about
+  users ||--o{ projects : "owner_id"
+  users |o--o{ projects : "reviewer_id"
+  projects ||--|{ proposal_versions : "project_id"
+  users ||--o{ proposal_versions : "created_by"
+  projects ||--o{ reviews : "project_id"
+  proposal_versions ||--o{ reviews : "proposal_version_id"
+  users ||--o{ reviews : "reviewer_id"
+  projects |o--o{ audit_logs : "project_id"
+  users ||--o{ audit_logs : "actor_id"
+  users ||--o{ notifications : "recipient_id"
+  projects |o--o{ notifications : "project_id"
   users {
-    UUID id PK
-    VARCHAR name
-    VARCHAR email UK
-    VARCHAR password_hash
-    VARCHAR role
-    INTEGER admission_year "nullable; idx_users_admission_year_branch with branch"
-    VARCHAR branch "nullable"
+    UUID id PK "users_pkey"
+    VARCHAR(120) name
+    VARCHAR(255) email UK "users_email_key"
+    VARCHAR(100) password_hash
+    VARCHAR(20) role "users_role_check: STUDENT, FACULTY, COORDINATOR"
     TIMESTAMPTZ created_at
+    INTEGER admission_year "nullable, idx_users_admission_year_branch with branch"
+    VARCHAR(20) branch "nullable"
   }
   projects {
-    UUID id PK
-    VARCHAR title
+    UUID id PK "projects_pkey"
+    VARCHAR(200) title
     TEXT description
-    VARCHAR tech_stack
-    TEXT team_members
-    UUID owner_id FK "idx_projects_owner"
-    UUID reviewer_id FK "idx_projects_reviewer"
-    VARCHAR status "idx_projects_status"
-    BIGINT version
+    VARCHAR(500) tech_stack "nullable"
+    TEXT team_members "nullable"
+    UUID owner_id FK "projects_owner_id_fkey, idx_projects_owner"
+    UUID reviewer_id FK "nullable, projects_reviewer_id_fkey, idx_projects_reviewer"
+    VARCHAR(30) status "projects_status_check: DRAFT, SUBMITTED, UNDER_REVIEW, REVISION_REQUESTED, APPROVED, REJECTED; idx_projects_status"
+    BIGINT version "DEFAULT 0, optimistic lock"
     TIMESTAMPTZ created_at
     TIMESTAMPTZ updated_at "idx_projects_updated_at"
   }
   proposal_versions {
-    UUID id PK
-    UUID project_id FK "ux_proposal_one_open_draft (WHERE state = DRAFT)"
-    INTEGER version_number "uq_proposal_project_version with project_id"
-    TEXT problem_statement
-    TEXT objectives
-    TEXT methodology
-    TEXT expected_outcome
-    TEXT timeline
-    VARCHAR reference_link
-    VARCHAR state
-    TIMESTAMPTZ submitted_at
-    UUID created_by FK
+    UUID id PK "proposal_versions_pkey"
+    UUID project_id FK "proposal_versions_project_id_fkey; uq_proposal_project_version with version_number; ux_proposal_one_open_draft WHERE state = 'DRAFT'"
+    INTEGER version_number "proposal_versions_version_number_check: at least 1"
+    TEXT problem_statement "nullable"
+    TEXT objectives "nullable"
+    TEXT methodology "nullable"
+    TEXT expected_outcome "nullable"
+    TEXT timeline "nullable"
+    VARCHAR(500) reference_link "nullable"
+    VARCHAR(20) state "proposal_versions_state_check: DRAFT, SUBMITTED; trg_proposal_versions_immutable blocks UPDATE and DELETE when SUBMITTED"
+    TIMESTAMPTZ submitted_at "nullable, ck_proposal_submitted_at: set exactly when SUBMITTED"
+    UUID created_by FK "proposal_versions_created_by_fkey"
     TIMESTAMPTZ created_at
   }
   reviews {
-    UUID id PK
-    UUID project_id FK "idx_reviews_project"
-    UUID proposal_version_id FK
-    UUID reviewer_id FK
-    VARCHAR decision
-    TEXT comments
+    UUID id PK "reviews_pkey"
+    UUID project_id FK "reviews_project_id_fkey, idx_reviews_project"
+    UUID proposal_version_id FK "reviews_proposal_version_id_fkey"
+    UUID reviewer_id FK "reviews_reviewer_id_fkey"
+    VARCHAR(30) decision "reviews_decision_check: APPROVE, REQUEST_REVISION, REJECT"
+    TEXT comments "nullable, ck_review_comments: required unless APPROVE"
     TIMESTAMPTZ created_at
   }
   audit_logs {
-    UUID id PK
-    UUID project_id FK "idx_audit_logs_project with created_at"
-    UUID actor_id FK "idx_audit_logs_actor with created_at"
-    VARCHAR action "idx_audit_logs_action with created_at"
-    VARCHAR from_status
-    VARCHAR to_status
-    TEXT details
+    UUID id PK "audit_logs_pkey; trg_audit_logs_append_only blocks UPDATE and DELETE"
+    UUID project_id FK "nullable, audit_logs_project_id_fkey; idx_audit_logs_project with created_at"
+    UUID actor_id FK "audit_logs_actor_id_fkey; idx_audit_logs_actor with created_at"
+    VARCHAR(40) action "idx_audit_logs_action with created_at"
+    VARCHAR(30) from_status "nullable"
+    VARCHAR(30) to_status "nullable"
+    TEXT details "nullable, JSON text"
     TIMESTAMPTZ created_at "idx_audit_logs_created_at"
   }
   notifications {
-    UUID id PK
-    UUID recipient_id FK "idx_notifications_recipient_read with is_read; idx_notifications_recipient_created with created_at"
-    UUID project_id FK "nullable"
-    VARCHAR type
-    VARCHAR message
-    BOOLEAN is_read
+    UUID id PK "notifications_pkey"
+    UUID recipient_id FK "notifications_recipient_id_fkey; idx_notifications_recipient_read with is_read; idx_notifications_recipient_created with created_at"
+    UUID project_id FK "nullable, notifications_project_id_fkey"
+    VARCHAR(30) type "notifications_type_check: REVIEWER_ASSIGNED, REVIEWER_UNASSIGNED, REVIEW_DECISION, RESUBMITTED"
+    VARCHAR(500) message
+    BOOLEAN is_read "DEFAULT false"
     TIMESTAMPTZ created_at
   }
 ```
@@ -711,35 +714,63 @@ erDiagram
 
 ```mermaid
 flowchart TB
-  FE["prastav-frontend<br/>React + TS, Vite, TanStack Query, Axios"]
-  subgraph BE["prastav-backend: Spring Boot 3, Java 17"]
-    SEC["Security: JwtAuthenticationFilter, SecurityConfig, @PreAuthorize"]
-    WEB["Controllers + DTO mappers, GlobalExceptionHandler"]
-    AUTH["auth: UserService, AuthService, JwtService"]
-    PROJ["project: ProjectService, ProjectStore, ProjectAccessPolicy, ProjectHistoryService, DashboardService"]
-    PROP["proposal: ProposalService, ProposalVersionFactory"]
-    REV["review: ReviewService, ReviewDecisionHandler x3"]
-    WF["workflow: WorkflowService, ProjectState x6, ProjectStateFactory"]
-    AUD["audit: AuditEventListener, AuditRecorder, AuditQueryService"]
-    NOTIF["notification: NotificationListener, NotificationDispatcher, NotificationService"]
+  subgraph Browser
+    FE["prastav-frontend<br/>(React + TS, Vite, TanStack Query, Axios)"]
+  end
+  subgraph BE["prastav-backend (Spring Boot 3, Java 17)"]
+    SEC["Security<br/>(JwtAuthenticationFilter, SecurityConfig, @PreAuthorize)"]
+    subgraph WL["web layer"]
+      WEB["Controllers + DTO mappers<br/>(Auth, User, Project, Dashboard, Proposal, Review, Audit, Notification)<br/>GlobalExceptionHandler"]
+    end
+    subgraph MODS["modules"]
+      AUTH["auth<br/>(UserService, AuthService, JwtService, EmailPolicy)"]
+      PROJ["project<br/>(ProjectService, ProjectStore, ProjectAccessPolicy,<br/>ProjectHistoryService, DashboardService)"]
+      PROP["proposal<br/>(ProposalService, ProposalVersionFactory, ProposalDiffService)"]
+      REV["review<br/>(ReviewService, ReviewDecisionHandler x3)"]
+      WF["workflow<br/>(WorkflowService, ProjectState x6, ProjectStateFactory, AllowedActionsResolver)"]
+      AUD["audit<br/>(AuditEventListener, AuditRecorder, AuditQueryService)"]
+      NOTIF["notification<br/>(NotificationListener, NotificationDispatcher, NotificationChannel x2, NotificationService)"]
+    end
     REPO["Spring Data JPA repositories"]
     FLY["Flyway migrations"]
   end
-  DB[("PostgreSQL 16 (docker-compose)")]
-  FE -->|"REST + Bearer JWT"| SEC --> WEB
-  WEB --> AUTH & PROJ & PROP & REV & WF & AUD & NOTIF
-  REV -->|strategies| WF
-  PROJ --> PROP
-  PROP -->|allowed actions| WF
-  WF -->|open draft| PROP
-  WF -.->|events| AUD
-  PROJ -.->|events| AUD
-  PROP -.->|events| AUD
-  REV -.->|events| AUD
-  WF -.->|events, after commit| NOTIF
-  REV -.->|events, after commit| NOTIF
-  NOTIF --> PROJ
-  AUTH & PROJ & PROP & REV & AUD --> REPO
+  DB[("PostgreSQL 16<br/>(docker-compose)")]
+  FE -->|"REST + Bearer JWT (/api, proxied by Vite)"| SEC
+  SEC --> WEB
+  WEB --> AUTH
+  WEB --> PROJ
+  WEB --> PROP
+  WEB --> REV
+  WEB --> WF
+  WEB --> AUD
+  WEB --> NOTIF
+  REV -->|"decision strategies"| WF
+  REV -->|"ProjectStore, ProjectAccessPolicy"| PROJ
+  REV -->|"latest submitted version"| PROP
+  REV -->|"UserService"| AUTH
+  WF -->|"ProjectStore"| PROJ
+  WF -->|"open draft"| PROP
+  WF -->|"UserService"| AUTH
+  PROP -->|"ProjectStore, ProjectAccessPolicy"| PROJ
+  PROP -->|"ProjectStateFactory"| WF
+  PROJ -->|"proposal versions"| PROP
+  PROJ -->|"AllowedActionsResolver"| WF
+  PROJ -->|"UserService"| AUTH
+  PROJ -->|"timeline reviews"| REV
+  PROJ -->|"timeline status changes"| AUD
+  NOTIF -->|"ProjectStore"| PROJ
+  NOTIF -->|"UserService"| AUTH
+  WF -.->|"events"| AUD
+  PROJ -.->|"events"| AUD
+  PROP -.->|"events"| AUD
+  REV -.->|"events"| AUD
+  WF -.->|"events, after commit"| NOTIF
+  REV -.->|"events, after commit"| NOTIF
+  AUTH --> REPO
+  PROJ --> REPO
+  PROP --> REPO
+  REV --> REPO
+  AUD --> REPO
   NOTIF --> REPO
   REPO --> DB
   FLY --> DB
