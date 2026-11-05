@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -127,5 +128,70 @@ class ProposalDiffServiceTest {
 
         assertFalse(diff.fields().isEmpty());
         assertTrue(diff.fields().stream().allMatch(FieldDiff::changed));
+    }
+
+    @Test
+    void aFieldEmptyInBothVersionsIsUnchangedAndOneFilledInLaterIsChanged() {
+        ProposalContent later = new ProposalContent("Paper-based approvals are slow", null, null, null, null, null);
+        stored(TestData.draft(project, 1, ProposalContent.empty()));
+        stored(TestData.draft(project, 2, later));
+
+        ProposalDiff diff = diffService.compare(project.getId(), 1, 2, TestData.actor(owner));
+
+        FieldDiff filledIn = diff.fields().get(0);
+        assertNull(filledIn.fromValue());
+        assertEquals("Paper-based approvals are slow", filledIn.toValue());
+        assertTrue(filledIn.changed());
+        FieldDiff stillEmpty = diff.fields().get(1);
+        assertNull(stillEmpty.fromValue());
+        assertNull(stillEmpty.toValue());
+        assertFalse(stillEmpty.changed());
+    }
+
+    @Test
+    void comparisonIsExactSoCaseAndSpacingCountAsChanges() {
+        ProposalContent first = new ProposalContent("Slow approvals", "Digitise", null, null, null, null);
+        ProposalContent second = new ProposalContent("slow approvals", "Digitise ", null, null, null, null);
+        stored(TestData.draft(project, 1, first));
+        stored(TestData.draft(project, 2, second));
+
+        ProposalDiff diff = diffService.compare(project.getId(), 1, 2, TestData.actor(owner));
+
+        assertTrue(diff.fields().get(0).changed());
+        assertTrue(diff.fields().get(1).changed());
+    }
+
+    @Test
+    void aMissingFromVersionIs404() {
+        stored(TestData.submittedVersion(project, 2));
+
+        NotFoundException error = assertThrows(NotFoundException.class,
+                () -> diffService.compare(project.getId(), 9, 2, TestData.actor(owner)));
+        assertEquals("Proposal version 9 not found", error.getMessage());
+    }
+
+    @Test
+    void versionsAreOnlyLookedUpInsideTheRequestedProject() {
+        Project other = TestData.project(owner);
+        when(projectStore.getById(other.getId())).thenReturn(other);
+        stored(TestData.submittedVersion(project, 1));
+        stored(TestData.submittedVersion(project, 2));
+
+        assertThrows(NotFoundException.class, () -> diffService.compare(other.getId(), 1, 2, TestData.actor(owner)));
+    }
+
+    @Test
+    void anUnknownProjectIs404BeforeAnyVersionIsRead() {
+        UUID unknown = UUID.randomUUID();
+        when(projectStore.getById(unknown)).thenThrow(new NotFoundException("Project", unknown));
+
+        assertThrows(NotFoundException.class, () -> diffService.compare(unknown, 1, 2, TestData.actor(owner)));
+        verify(versionRepository, never()).findByProject_IdAndVersionNumber(any(), anyInt());
+    }
+
+    @Test
+    void aNonParticipantIsForbiddenEvenWhenAskingForTheSameVersionTwice() {
+        assertThrows(ForbiddenException.class,
+                () -> diffService.compare(project.getId(), 1, 1, TestData.actor(TestData.student())));
     }
 }
