@@ -9,7 +9,7 @@ node "Browser" {
 node "prastav-backend (Spring Boot 3, Java 17)" {
   component "Security\n(JwtAuthenticationFilter,\nSecurityConfig, @PreAuthorize)" as SEC
   package "web layer" {
-    component "Controllers + DTO mappers\n(Auth, User, Project, Dashboard,\nProposal, Review, Notification)" as WEB
+    component "Controllers + DTO mappers\n(Auth, User, Project, Dashboard,\nProposal, Review, Audit, Notification)" as WEB
     component "GlobalExceptionHandler" as GEH
   }
   package "modules" {
@@ -34,6 +34,7 @@ WEB --> PROJ
 WEB --> PROP
 WEB --> REV
 WEB --> WF
+WEB --> AUD
 WEB --> NOTIF
 REV --> WF : decision strategies
 PROJ --> PROP

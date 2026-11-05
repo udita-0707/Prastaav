@@ -1,137 +1,132 @@
 @startuml 12_events_and_strategies
 !include _style.iuml
-title Prastav - Observer (domain events), Strategy (review decisions, email policy, notification channels) and Decorator (retries)
+title Prastav - Observer (domain events and audit) and Strategy (review decisions)
 hide empty members
 
-package "Observer: events" {
-  class ProjectCreatedEvent <<record>>
-  class ProposalVersionCreatedEvent <<record>>
-  class ProposalDraftUpdatedEvent <<record>>
-  class ProjectStatusChangedEvent <<record>>
-  class ReviewRecordedEvent <<record>>
-  class ReviewerReassignedEvent <<record>>
-
-  class AuditEventListener {
-    - recorder : AuditRecorder
-    - objectMapper : ObjectMapper
-    + on(event : ProjectCreatedEvent)
-    + on(event : ProposalVersionCreatedEvent)
-    + on(event : ProposalDraftUpdatedEvent)
-    + on(event : ProjectStatusChangedEvent)
-    + on(event : ReviewerReassignedEvent)
-    + on(event : ReviewRecordedEvent)
-  }
-  interface AuditRecorder {
-    + record(entry : AuditLog)
-  }
-  class JpaAuditRecorder
-  AuditRecorder <|.. JpaAuditRecorder
-  AuditEventListener --> AuditRecorder
+class ProjectCreatedEvent <<record>> {
+  projectId : UUID
+  actorId : UUID
+  title : String
 }
 
-AuditEventListener ..> ProjectCreatedEvent
-AuditEventListener ..> ProposalVersionCreatedEvent
-AuditEventListener ..> ProposalDraftUpdatedEvent
-AuditEventListener ..> ProjectStatusChangedEvent
-AuditEventListener ..> ReviewRecordedEvent
-AuditEventListener ..> ReviewerReassignedEvent
+class ProposalVersionCreatedEvent <<record>> {
+  projectId : UUID
+  versionNumber : int
+  actorId : UUID
+}
 
-class NotificationListener {
-  - projectStore : ProjectStore
-  - userService : UserService
-  - dispatcher : NotificationDispatcher
+class ProposalDraftUpdatedEvent <<record>> {
+  projectId : UUID
+  versionNumber : int
+  actorId : UUID
+}
+
+class ProjectStatusChangedEvent <<record>> {
+  projectId : UUID
+  actorId : UUID
+  action : Action
+  fromStatus : ProjectStatus
+  toStatus : ProjectStatus
+  details : Map<String, String>
+}
+
+class ReviewerReassignedEvent <<record>> {
+  projectId : UUID
+  actorId : UUID
+  previousReviewerId : UUID
+  newReviewerId : UUID
+}
+
+class ReviewRecordedEvent <<record>> {
+  projectId : UUID
+  reviewId : UUID
+  versionNumber : int
+  reviewerId : UUID
+  decision : ReviewDecision
+}
+
+class AuditEventListener <<Observer>> {
+  - recorder : AuditRecorder
+  - objectMapper : ObjectMapper
+  + on(event : ProjectCreatedEvent)
+  + on(event : ProposalVersionCreatedEvent)
+  + on(event : ProposalDraftUpdatedEvent)
   + on(event : ProjectStatusChangedEvent)
   + on(event : ReviewerReassignedEvent)
   + on(event : ReviewRecordedEvent)
 }
-note right of NotificationListener
-  @TransactionalEventListener (after commit)
-  @Transactional(REQUIRES_NEW)
-  ASSIGN_REVIEWER -> reviewer
-  SUBMIT from REVISION_REQUESTED -> reviewer
-  review decision -> owner
-  reassignment -> previous and new reviewer
-end note
+
+interface AuditRecorder {
+  + record(entry : AuditLog)
+}
+
+class JpaAuditRecorder {
+  - auditLogRepository : AuditLogRepository
+  + record(entry : AuditLog)
+}
+
+class NotificationListener <<Observer>> {
+  + on(event : ProjectStatusChangedEvent)
+  + on(event : ReviewerReassignedEvent)
+  + on(event : ReviewRecordedEvent)
+}
+
+interface ReviewDecisionHandler <<Strategy>> {
+  + decision() : ReviewDecision
+  + apply(projectId : UUID, actor : Actor, comments : String)
+}
+
+class ApproveDecisionHandler {
+  - workflowService : WorkflowService
+}
+
+class RequestRevisionDecisionHandler {
+  - workflowService : WorkflowService
+}
+
+class RejectDecisionHandler {
+  - workflowService : WorkflowService
+}
+
+class ReviewService {
+  - handlers : Map<ReviewDecision, ReviewDecisionHandler>
+  + recordReview(projectId : UUID, decision : ReviewDecision, comments : String, versionNumber : Integer, actor : Actor) : Review
+  + listReviews(projectId : UUID, actor : Actor) : List<Review>
+}
+
+class WorkflowService <<Facade>> {
+  + approve(projectId : UUID, actor : Actor) : Project
+  + requestRevision(projectId : UUID, actor : Actor, comments : String) : Project
+  + reject(projectId : UUID, actor : Actor, comments : String) : Project
+}
+
+AuditRecorder <|.. JpaAuditRecorder
+AuditEventListener "1" --> "1" AuditRecorder : recorder
+AuditEventListener ..> ProjectCreatedEvent
+AuditEventListener ..> ProposalVersionCreatedEvent
+AuditEventListener ..> ProposalDraftUpdatedEvent
+AuditEventListener ..> ProjectStatusChangedEvent
+AuditEventListener ..> ReviewerReassignedEvent
+AuditEventListener ..> ReviewRecordedEvent
 NotificationListener ..> ProjectStatusChangedEvent
-NotificationListener ..> ReviewRecordedEvent
 NotificationListener ..> ReviewerReassignedEvent
-NotificationListener --> NotificationDispatcher : dispatch()
-
-package "Strategy: review decisions" {
-  interface ReviewDecisionHandler {
-    + decision() : ReviewDecision
-    + apply(projectId : UUID, actor : Actor, comments : String)
-  }
-  class ApproveDecisionHandler
-  class RequestRevisionDecisionHandler
-  class RejectDecisionHandler
-  ReviewDecisionHandler <|.. ApproveDecisionHandler
-  ReviewDecisionHandler <|.. RequestRevisionDecisionHandler
-  ReviewDecisionHandler <|.. RejectDecisionHandler
-
-  class ReviewService {
-    - handlers : Map<ReviewDecision, ReviewDecisionHandler>
-    + recordReview(projectId, decision, comments, versionNumber, actor) : Review
-    + listReviews(projectId : UUID, actor : Actor) : List<Review>
-  }
-  ReviewService o--> ReviewDecisionHandler
-}
-
-package "Strategy: institution email policy" {
-  interface EmailPolicy {
-    + requireInstitutional(email : String) : String
-    + requireStudent(email : String) : StudentEmail
-  }
-  class PatternEmailPolicy
-  EmailPolicy <|.. PatternEmailPolicy
-  class AuthService {
-    + register(name, email, password, role) : AuthResult
-  }
-  class UserService {
-    + createAccount(actor, name, email, password, role) : User
-  }
-  AuthService --> EmailPolicy : requireStudent()
-  UserService --> EmailPolicy : requireInstitutional()
-}
-
-package "Strategy and Decorator: notification channels" {
-  interface NotificationChannel {
-    + name() : String
-    + deliver(notification : Notification)
-  }
-  class InAppNotificationChannel {
-    - notificationService : NotificationService
-  }
-  class EmailNotificationChannel
-  NotificationChannel <|.. InAppNotificationChannel
-  NotificationChannel <|.. EmailNotificationChannel
-  class RetryingNotificationChannel <<Decorator>> {
-    - delegate : NotificationChannel
-    - maxAttempts : int
-    - delay : Duration
-  }
-  NotificationChannel <|.. RetryingNotificationChannel
-  RetryingNotificationChannel o--> "1" NotificationChannel : delegate
-
-  class NotificationDispatcher {
-    - enabledChannels : List<NotificationChannel>
-    + dispatch(notification : Notification)
-  }
-  class NotificationProperties <<record>> {
-    + enabledChannels() : List<String>
-    + retry() : Retry
-  }
-  NotificationDispatcher o--> RetryingNotificationChannel : wraps each enabled channel
-  NotificationDispatcher ..> NotificationProperties : enabled-channels, retry
-  class NotificationService {
-    + create(recipient, project, type, message) : Notification
-  }
-  InAppNotificationChannel --> NotificationService : create()
-}
-
-class WorkflowService <<Facade>>
-ApproveDecisionHandler --> WorkflowService : approve()
-RequestRevisionDecisionHandler --> WorkflowService : requestRevision()
-RejectDecisionHandler --> WorkflowService : reject()
+NotificationListener ..> ReviewRecordedEvent
+ReviewDecisionHandler <|.. ApproveDecisionHandler
+ReviewDecisionHandler <|.. RequestRevisionDecisionHandler
+ReviewDecisionHandler <|.. RejectDecisionHandler
+ReviewService "1" o--> "3" ReviewDecisionHandler : handlers
 ReviewService ..> ReviewRecordedEvent : publishes
+ApproveDecisionHandler "1" --> "1" WorkflowService : approve()
+RequestRevisionDecisionHandler "1" --> "1" WorkflowService : requestRevision()
+RejectDecisionHandler "1" --> "1" WorkflowService : reject()
+
+note right of AuditEventListener
+  Runs in the publisher's transaction: a change
+  and its audit row commit or roll back together.
+end note
+
+note right of NotificationListener
+  Runs after commit in its own transaction.
+  See the notification class and sequence diagrams.
+end note
 @enduml

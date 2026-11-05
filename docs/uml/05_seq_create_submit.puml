@@ -8,37 +8,39 @@ participant "ProjectService" as PS
 participant "ProposalService" as PRS
 participant "ProposalVersionFactory" as PVF
 participant "WorkflowService" as WS
+participant "ProjectStore" as ST
 participant "ProjectStateFactory" as PSF
 participant "DraftState" as DS
 participant "AuditEventListener" as AEL
 database PostgreSQL as DB
 
-Student -> PC : POST /api/projects {title, ..., proposal}
+Student -> PC : POST /api/projects {title, description, proposal}
 PC -> PS : createProject(newProject, proposal, actor)
-PS -> DB : save(Project status=DRAFT)
-PS -> AEL : publish ProjectCreatedEvent
+PS -> DB : save Project with status DRAFT
+PS -> AEL : ProjectCreatedEvent
 AEL -> DB : insert audit PROJECT_CREATED
-PS -> PRS : createInitialDraft(project, content, actor)
-PRS -> PVF : initialDraft(project, content, userId)
+PS -> PRS : createInitialDraft(project, proposal, actor)
+PRS -> PVF : initialDraft(project, content, createdBy)
 PVF --> PRS : ProposalVersion v1 (DRAFT)
-PRS -> DB : save(v1)
-PRS -> AEL : publish ProposalVersionCreatedEvent
+PRS -> DB : save v1
+PRS -> AEL : ProposalVersionCreatedEvent
 AEL -> DB : insert audit VERSION_CREATED
-PS --> PC : ProjectView (allowedActions = SUBMIT, EDIT_DRAFT)
+PS --> PC : ProjectView with allowedActions SUBMIT, EDIT_DRAFT
 PC --> Student : 201 ProjectDetailResponse
-
 Student -> PC : POST /api/projects/{id}/submit
-PC -> WS : submit(id, actor)
-WS -> PRS : findOpenDraft(id)
+PC -> WS : submit(projectId, actor)
+WS -> ST : getById(projectId)
+WS -> PRS : findOpenDraft(projectId)
 PRS --> WS : v1
 WS -> PSF : stateOf(DRAFT)
 PSF --> WS : DraftState
 WS -> DS : submit(project, actor, v1)
-DS -> DS : Guards.requireOwner / requireOpenDraft / requireComplete
-DS -> DS : v1.submit() (now immutable)\nproject.moveTo(SUBMITTED)
-WS -> DB : save(project) [@Version check]
-WS -> AEL : publish ProjectStatusChangedEvent(DRAFT -> SUBMITTED)
+DS -> DS : Guards.requireOwner, requireOpenDraft, requireComplete
+DS -> DS : v1.submit() makes the version immutable, project.moveTo(SUBMITTED)
+WS -> ST : save(project)
+WS -> AEL : ProjectStatusChangedEvent from DRAFT to SUBMITTED
 AEL -> DB : insert audit PROPOSAL_SUBMITTED
+WS -> DB : commit, the UPDATE checks Project.version
 PC -> PS : getProject(id, actor)
-PC --> Student : 200 ProjectDetailResponse (status SUBMITTED)
+PC --> Student : 200 ProjectDetailResponse with status SUBMITTED
 @enduml

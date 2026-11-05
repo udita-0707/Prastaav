@@ -3,23 +3,26 @@
 title Prastav - Project status machine with guards
 hide empty description
 
-[*] --> DRAFT : ProjectService.createProject\n(student; v1 draft created)
-DRAFT --> SUBMITTED : submit\n[actor is owner; open draft;\nrequired fields filled]
-SUBMITTED --> UNDER_REVIEW : assignReviewer\n[actor is COORDINATOR;\nassignee has FACULTY role]
-UNDER_REVIEW --> APPROVED : approve\n[actor is assigned faculty]
-UNDER_REVIEW --> REVISION_REQUESTED : requestRevision\n[assigned faculty;\ncomments mandatory]
-UNDER_REVIEW --> REJECTED : reject\n[assigned faculty;\ncomments mandatory]
-UNDER_REVIEW --> UNDER_REVIEW : reassignReviewer\n[actor is COORDINATOR;\nnew reviewer FACULTY,\nnot the current one]
-REVISION_REQUESTED --> UNDER_REVIEW : submit (resubmit)\n[owner; new version vN+1 open and complete;\nreviewer already assigned]
+[*] --> DRAFT : createProject\n[actor is STUDENT, v1 draft created]
+DRAFT --> SUBMITTED : submit\n[actor is owner, open draft, required fields filled]
+SUBMITTED --> UNDER_REVIEW : assignReviewer\n[actor is COORDINATOR, assignee has FACULTY role]
+UNDER_REVIEW --> APPROVED : approve\n[actor is assigned FACULTY reviewer]
+UNDER_REVIEW --> REVISION_REQUESTED : requestRevision\n[assigned FACULTY reviewer, comments mandatory]
+UNDER_REVIEW --> REJECTED : reject\n[assigned FACULTY reviewer, comments mandatory]
+UNDER_REVIEW --> UNDER_REVIEW : reassignReviewer\n[actor is COORDINATOR, new reviewer has FACULTY role and is not the current one]
+REVISION_REQUESTED --> UNDER_REVIEW : submit (resubmit)\n[actor is owner, open draft vN+1, required fields filled, reviewer set]
 APPROVED --> [*]
 REJECTED --> [*]
 
-state DRAFT : allowed: SUBMIT, EDIT_DRAFT
-state SUBMITTED : allowed: ASSIGN_REVIEWER
-state UNDER_REVIEW : allowed: APPROVE, REQUEST_REVISION, REJECT,\nREASSIGN_REVIEWER
-state REVISION_REQUESTED : allowed: CREATE_REVISION, EDIT_DRAFT, SUBMIT
+state DRAFT : allowed SUBMIT, EDIT_DRAFT
+state SUBMITTED : allowed ASSIGN_REVIEWER
+state UNDER_REVIEW : allowed APPROVE, REQUEST_REVISION, REJECT, REASSIGN_REVIEWER
+state REVISION_REQUESTED : allowed CREATE_REVISION, EDIT_DRAFT, SUBMIT
 state APPROVED : terminal
 state REJECTED : terminal
 
-note "Any action not on an arrow throws\nIllegalTransitionException (HTTP 409 ILLEGAL_TRANSITION).\nGuard failures: 403 FORBIDDEN (who),\n400 VALIDATION_FAILED (comments, fields),\n409 (no open draft)." as N1
+note as N1
+  Any action not on an arrow throws IllegalTransitionException (409 ILLEGAL_TRANSITION).
+  Guard failures: 403 FORBIDDEN (who), 400 VALIDATION_FAILED (comments, fields, assignee role), 409 ILLEGAL_TRANSITION (no open draft, no reviewer).
+end note
 @enduml

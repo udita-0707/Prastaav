@@ -1,6 +1,6 @@
 @startuml 03_workflow_state_pattern
 !include _style.iuml
-title Prastav - Workflow engine (State + Factory + Facade)
+title Prastav - Workflow engine (State + Factory + Facade), its events and listeners
 hide empty members
 
 interface ProjectState <<State>> {
@@ -13,40 +13,46 @@ interface ProjectState <<State>> {
   + requestRevision(project : Project, actor : Actor, comments : String)
   + reject(project : Project, actor : Actor, comments : String)
 }
-note right of ProjectState
-  Every method is a default method that
-  throws IllegalTransitionException.
-  A state overrides only its legal actions.
-end note
 
 class DraftState {
-  + submit(...)
+  + status() : ProjectStatus
+  + availableActions() : Set<Action>
+  + submit(project : Project, actor : Actor, draft : ProposalVersion)
 }
-class SubmittedState {
-  + assignReviewer(...)
-}
-class UnderReviewState {
-  + approve(...)
-  + requestRevision(...)
-  + reject(...)
-  + reassignReviewer(...)
-}
-class RevisionRequestedState {
-  + submit(...)
-}
-class ApprovedState
-class RejectedState
 
-ProjectState <|.. DraftState
-ProjectState <|.. SubmittedState
-ProjectState <|.. UnderReviewState
-ProjectState <|.. RevisionRequestedState
-ProjectState <|.. ApprovedState
-ProjectState <|.. RejectedState
+class SubmittedState {
+  + status() : ProjectStatus
+  + availableActions() : Set<Action>
+  + assignReviewer(project : Project, faculty : User, actor : Actor)
+}
+
+class UnderReviewState {
+  + status() : ProjectStatus
+  + availableActions() : Set<Action>
+  + reassignReviewer(project : Project, faculty : User, actor : Actor)
+  + approve(project : Project, actor : Actor)
+  + requestRevision(project : Project, actor : Actor, comments : String)
+  + reject(project : Project, actor : Actor, comments : String)
+}
+
+class RevisionRequestedState {
+  + status() : ProjectStatus
+  + availableActions() : Set<Action>
+  + submit(project : Project, actor : Actor, draft : ProposalVersion)
+}
+
+class ApprovedState {
+  + status() : ProjectStatus
+  + availableActions() : Set<Action>
+}
+
+class RejectedState {
+  + status() : ProjectStatus
+  + availableActions() : Set<Action>
+}
 
 class ProjectStateFactory <<Factory>> {
   - states : Map<ProjectStatus, ProjectState>
-  + ProjectStateFactory(stateBeans : List<ProjectState>)
   + stateOf(status : ProjectStatus) : ProjectState
 }
 
@@ -62,7 +68,7 @@ class WorkflowService <<Facade>> {
   + approve(projectId : UUID, actor : Actor) : Project
   + requestRevision(projectId : UUID, actor : Actor, comments : String) : Project
   + reject(projectId : UUID, actor : Actor, comments : String) : Project
-  - transition(project, actor, action, step, details) : Project
+  - transition(project : Project, actor : Actor, action : Action, step : Consumer<ProjectState>, details : Map<String, String>) : Project
 }
 
 class Guards <<utility>> {
@@ -93,6 +99,8 @@ enum Action {
 class IllegalTransitionException {
   - from : ProjectStatus
   - action : Action
+  + getFrom() : ProjectStatus
+  + getAction() : Action
 }
 
 class ProjectStatusChangedEvent <<record>> {
@@ -116,16 +124,47 @@ class ProjectStore {
   + save(project : Project) : Project
 }
 
-ProjectStateFactory o--> "6" ProjectState
-WorkflowService --> ProjectStateFactory
-WorkflowService --> ProjectStore
+class AuditEventListener <<Observer>> {
+  + on(event : ProjectStatusChangedEvent)
+  + on(event : ReviewerReassignedEvent)
+}
+
+class NotificationListener <<Observer>> {
+  + on(event : ProjectStatusChangedEvent)
+  + on(event : ReviewerReassignedEvent)
+}
+
+ProjectState <|.. DraftState
+ProjectState <|.. SubmittedState
+ProjectState <|.. UnderReviewState
+ProjectState <|.. RevisionRequestedState
+ProjectState <|.. ApprovedState
+ProjectState <|.. RejectedState
+ProjectStateFactory "1" o--> "6" ProjectState : states
+WorkflowService "1" --> "1" ProjectStateFactory : stateFactory
+WorkflowService "1" --> "1" ProjectStore : projectStore
+AllowedActionsResolver "1" --> "1" ProjectStateFactory : stateFactory
 WorkflowService ..> ProjectStatusChangedEvent : publishes
 WorkflowService ..> ReviewerReassignedEvent : publishes
-AllowedActionsResolver --> ProjectStateFactory
+AuditEventListener ..> ProjectStatusChangedEvent : listens, same transaction
+AuditEventListener ..> ReviewerReassignedEvent : listens, same transaction
+NotificationListener ..> ProjectStatusChangedEvent : listens, after commit
+NotificationListener ..> ReviewerReassignedEvent : listens, after commit
 DraftState ..> Guards
 SubmittedState ..> Guards
 UnderReviewState ..> Guards
 RevisionRequestedState ..> Guards
-ProjectState ..> IllegalTransitionException : throws
+ProjectState ..> IllegalTransitionException : throws by default
 ProjectState ..> Action
+
+note right of ProjectState
+  Every action is a default method that throws
+  IllegalTransitionException. A state overrides
+  only its legal actions.
+end note
+
+note right of ApprovedState
+  APPROVED and REJECTED are terminal:
+  they override no action.
+end note
 @enduml

@@ -1,4 +1,5 @@
-' Shared style for every Prastav diagram.
+' Shared style for every Prastav diagram. Smetana is PlantUML's built-in layout, so rendering needs no Graphviz.
+!pragma layout smetana
 skinparam shadowing false
 skinparam defaultFontName Arial
 skinparam defaultFontSize 12
