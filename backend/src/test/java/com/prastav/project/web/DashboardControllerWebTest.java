@@ -21,6 +21,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.Instant;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -94,5 +95,36 @@ class DashboardControllerWebTest {
         mockMvc.perform(get("/api/dashboard/summary"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code").value("UNAUTHENTICATED"));
+    }
+
+    @Test
+    void anEmptySummaryKeepsEveryListAndCount() throws Exception {
+        Map<ProjectStatus, Long> zeroes = new EnumMap<>(ProjectStatus.class);
+        for (ProjectStatus status : ProjectStatus.values()) {
+            zeroes.put(status, 0L);
+        }
+        when(dashboardService.summary(any(Actor.class))).thenReturn(new DashboardSummary(0, zeroes, List.of(), List.of()));
+
+        mockMvc.perform(get("/api/dashboard/summary").header("Authorization", bearer(Role.COORDINATOR)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(0))
+                .andExpect(jsonPath("$.byStatus.length()").value(ProjectStatus.values().length))
+                .andExpect(jsonPath("$.byStatus.REJECTED").value(0))
+                .andExpect(jsonPath("$.awaitingAssignment").isEmpty())
+                .andExpect(jsonPath("$.reviewerWorkload").isEmpty());
+    }
+
+    @Test
+    void aFacultyMemberWithNoOpenReviewAppearsWithZero() throws Exception {
+        ReviewerWorkload idle = mock(ReviewerWorkload.class);
+        when(idle.getReviewerId()).thenReturn(UUID.randomUUID());
+        when(idle.getReviewerName()).thenReturn("Dr. Kabir Sen");
+        when(idle.getOpenReviews()).thenReturn(0L);
+        when(dashboardService.summary(any(Actor.class))).thenReturn(new DashboardSummary(0, Map.of(), List.of(), List.of(idle)));
+
+        mockMvc.perform(get("/api/dashboard/summary").header("Authorization", bearer(Role.COORDINATOR)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewerWorkload[0].reviewer.name").value("Dr. Kabir Sen"))
+                .andExpect(jsonPath("$.reviewerWorkload[0].openReviews").value(0));
     }
 }
