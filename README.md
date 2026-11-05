@@ -249,6 +249,7 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 | Observer | domain events consumed by `AuditEventListener` (audit log) and `NotificationListener` (notifications after commit) |
 | Strategy | `ReviewDecisionHandler` and its three decision handlers; `EmailPolicy` with `PatternEmailPolicy` for account emails; `NotificationChannel` with `InAppNotificationChannel` and `EmailNotificationChannel`, run by `NotificationDispatcher` |
 | Decorator | `RetryingNotificationChannel` retries every enabled notification channel |
+| Singleton scope | every `@Service` and `@Component` is one stateless Spring bean; the caller travels as an `Actor` parameter |
 | Specification | `ProjectSpecifications` for the filtered project list, `AuditSpecifications` for the filtered audit log |
 | Repository | Spring Data repositories per module |
 | Builder | `AuditLog.Builder` |
