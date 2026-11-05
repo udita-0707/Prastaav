@@ -6,6 +6,7 @@ import type { UserResponse } from '../api/types';
 import { illustrations } from '../assets';
 import { useAuth } from '../auth/AuthContext';
 import { ROLE_LABEL } from '../components/labels';
+import { NotificationBell } from '../components/NotificationBell';
 import { Avatar, DropdownMenu, Logo } from '../components/ui';
 import { isNavActive, NAV_ITEMS, SEARCH_PLACEHOLDER } from '../config/navigation';
 
@@ -81,7 +82,7 @@ function GlobalSearch({ user }: { user: UserResponse }) {
   );
 }
 
-/** Signed-in frame: sidebar (a drawer below lg), top bar with search and the user menu, then the page. */
+/** Signed-in frame: sidebar (a drawer below lg), top bar with search, notifications and the user menu, then the page. */
 export function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -126,7 +127,8 @@ export function AppShell() {
             <Menu className="h-5 w-5" aria-hidden />
           </button>
           <GlobalSearch user={user} />
-          <div className="ml-auto">
+          <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+            <NotificationBell userId={user.id} />
             <DropdownMenu
               label={`Account menu for ${user.name}`}
               triggerClassName="flex items-center gap-3 rounded-xl px-2 py-1.5 hover:bg-slate-50"
