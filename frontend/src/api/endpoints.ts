@@ -3,6 +3,8 @@ import type {
   AuthResponse,
   CreateProjectRequest,
   DashboardSummaryResponse,
+  NotificationPageResponse,
+  NotificationResponse,
   ProjectCountsResponse,
   ProjectDetailResponse,
   ProjectListParams,
@@ -70,3 +72,15 @@ export const listReviews = (projectId: string) =>
 
 export const getHistory = (projectId: string) =>
   api.get<TimelineEntry[]>(`/projects/${projectId}/history`).then((r) => r.data);
+
+export const listNotifications = (page: number, size: number) =>
+  api.get<NotificationPageResponse>('/notifications', { params: { page, size } }).then((r) => r.data);
+
+export const getUnreadNotificationCount = () =>
+  api.get<{ count: number }>('/notifications/unread-count').then((r) => r.data.count);
+
+export const markNotificationRead = (id: string) =>
+  api.patch<NotificationResponse>(`/notifications/${id}/read`).then((r) => r.data);
+
+export const markAllNotificationsRead = () =>
+  api.patch<{ updated: number }>('/notifications/read-all').then((r) => r.data.updated);

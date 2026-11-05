@@ -208,3 +208,25 @@ export interface TimelineEntry {
   summary: string;
   versionNumber: number | null;
 }
+
+export type NotificationType = 'REVIEWER_ASSIGNED' | 'REVIEWER_UNASSIGNED' | 'REVIEW_DECISION' | 'RESUBMITTED';
+
+export interface NotificationResponse {
+  id: string;
+  type: NotificationType;
+  message: string;
+  /** Null when the notification has no project. */
+  projectId: string | null;
+  projectTitle: string | null;
+  read: boolean;
+  createdAt: string;
+}
+
+/** Body of GET /api/notifications: one page of the caller's inbox, newest first. */
+export interface NotificationPageResponse {
+  content: NotificationResponse[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+}
