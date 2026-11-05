@@ -13,6 +13,7 @@ import com.prastav.proposal.FieldDiff;
 import com.prastav.proposal.ProposalDiff;
 import com.prastav.proposal.ProposalDiffService;
 import com.prastav.proposal.ProposalService;
+import com.prastav.support.TestData;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -25,10 +26,14 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.hamcrest.Matchers.nullValue;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -144,5 +149,17 @@ class ProposalControllerWebTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.fields[0].fromValue").value(nullValue()))
                 .andExpect(jsonPath("$.fields[0].toValue").value("https://example.org/ref"));
+    }
+
+    @Test
+    void simultaneousNextVersionRequestsGiveTheLoserA409WithNoDatabaseDetail() throws Exception {
+        when(proposalService.createNextVersion(eq(projectId), any(Actor.class)))
+                .thenThrow(TestData.uniqueViolation("uq_proposal_project_version"));
+
+        mockMvc.perform(post("/api/projects/{id}/proposals", projectId).header("Authorization", bearer(Role.STUDENT)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CONCURRENT_UPDATE"))
+                .andExpect(content().string(not(containsString("uq_proposal_project_version"))))
+                .andExpect(content().string(not(containsString("insert into"))));
     }
 }

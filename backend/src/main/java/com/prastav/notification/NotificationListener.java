@@ -22,8 +22,9 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * <p>
  * Why: the workflow and review code only publish facts and do not know notifications exist, so a new
  * notification is a new handler here rather than an edit to a service. Handlers run after the publisher's
- * transaction commits and in a transaction of their own, so a notification is only sent for a change that
- * really happened, and a delivery problem can never roll that change back.
+ * transaction commits, so a notification is only sent for a change that really happened, and a delivery problem
+ * can never roll that change back. They hold no transaction themselves: each delivery has its own, so one failure
+ * cannot affect another, and no database connection is kept across a retry pause.
  */
 @Component
 public class NotificationListener {
@@ -40,7 +41,7 @@ public class NotificationListener {
     }
 
     @TransactionalEventListener
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void on(ProjectStatusChangedEvent event) {
         if (event.action() == Action.ASSIGN_REVIEWER) {
             Project project = projectStore.getById(event.projectId());
@@ -55,7 +56,7 @@ public class NotificationListener {
     }
 
     @TransactionalEventListener
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void on(ReviewerReassignedEvent event) {
         Project project = projectStore.getById(event.projectId());
         notify(userService.getById(event.previousReviewerId()), project, NotificationType.REVIEWER_UNASSIGNED,
@@ -65,7 +66,7 @@ public class NotificationListener {
     }
 
     @TransactionalEventListener
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public void on(ReviewRecordedEvent event) {
         Project project = projectStore.getById(event.projectId());
         String outcome = switch (event.decision()) {

@@ -126,7 +126,7 @@ note right of AuditEventListener
 end note
 
 note right of NotificationListener
-  Runs after commit in its own transaction.
+  Runs after commit. Each delivery has its own transaction.
   See the notification class and sequence diagrams.
 end note
 @enduml
