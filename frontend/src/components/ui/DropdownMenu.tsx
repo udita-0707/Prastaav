@@ -14,7 +14,7 @@ export interface MenuItem {
 
 interface DropdownMenuProps {
   items: MenuItem[];
-  /** Accessible name of the trigger, e.g. "Actions for Smart Attendance". */
+  /** Accessible name of the menu, and of a trigger that only shows an icon, e.g. "Actions for Smart Attendance". */
   label: string;
   trigger?: ReactNode;
   align?: 'left' | 'right';
@@ -100,7 +100,7 @@ export function DropdownMenu({ items, label, trigger, align = 'right', triggerCl
       <button
         ref={button}
         type="button"
-        aria-label={label}
+        aria-label={trigger ? undefined : label}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}

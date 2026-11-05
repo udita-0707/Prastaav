@@ -147,12 +147,12 @@ export function AppShell() {
           <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
             <NotificationBell userId={user.id} />
             <DropdownMenu
-              label={`${user.name} ${ROLE_LABEL[user.role]}: account menu`}
+              label={`Account menu for ${user.name}`}
               triggerClassName="flex items-center gap-3 rounded-xl px-2 py-1.5 hover:bg-slate-50"
               trigger={
                 <>
                   <Avatar name={user.name} />
-                  <span className="hidden text-left sm:block">
+                  <span className="sr-only text-left sm:not-sr-only sm:block">
                     <span className="block text-sm font-semibold text-ink">{user.name}</span>
                     <span className="block text-xs text-muted">{ROLE_LABEL[user.role]}</span>
                   </span>
