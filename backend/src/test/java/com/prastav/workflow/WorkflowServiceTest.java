@@ -3,6 +3,7 @@ package com.prastav.workflow;
 import com.prastav.auth.User;
 import com.prastav.auth.UserService;
 import com.prastav.common.ForbiddenException;
+import com.prastav.common.NotFoundException;
 import com.prastav.common.ValidationException;
 import com.prastav.project.Project;
 import com.prastav.project.ProjectStore;
@@ -16,8 +17,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.OptimisticLockingFailureException;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -178,6 +182,49 @@ class WorkflowServiceTest {
 
         assertEquals(reviewer, project.getReviewer());
         verify(projectStore, never()).save(any(Project.class));
+        verify(events, never()).publishEvent(any(Object.class));
+    }
+
+    @Test
+    void unknownNewReviewerSavesNothingAndPublishesNothing() {
+        Project project = TestData.projectIn(ProjectStatus.UNDER_REVIEW, owner, reviewer);
+        UUID unknown = UUID.randomUUID();
+        when(projectStore.getById(project.getId())).thenReturn(project);
+        when(userService.getById(unknown)).thenThrow(new NotFoundException("User", unknown));
+
+        assertThrows(NotFoundException.class, () -> workflowService.reassignReviewer(project.getId(), unknown,
+                TestData.actor(TestData.coordinator())));
+
+        assertEquals(reviewer, project.getReviewer());
+        verify(projectStore, never()).save(any(Project.class));
+        verify(events, never()).publishEvent(any(Object.class));
+    }
+
+    @Test
+    void optimisticLockFailureOnSubmitReachesTheCallerAndPublishesNothing() {
+        Project project = TestData.project(owner);
+        when(projectStore.getById(project.getId())).thenReturn(project);
+        when(proposalService.findOpenDraft(project.getId()))
+                .thenReturn(Optional.of(TestData.draft(project, 1, TestData.completeContent())));
+        when(projectStore.save(project)).thenThrow(new ObjectOptimisticLockingFailureException(Project.class, project.getId()));
+
+        assertThrows(OptimisticLockingFailureException.class,
+                () -> workflowService.submit(project.getId(), TestData.actor(owner)));
+
+        verify(events, never()).publishEvent(any(Object.class));
+    }
+
+    @Test
+    void optimisticLockFailureOnReassignReachesTheCallerAndPublishesNothing() {
+        Project project = TestData.projectIn(ProjectStatus.UNDER_REVIEW, owner, reviewer);
+        User newReviewer = TestData.faculty();
+        when(projectStore.getById(project.getId())).thenReturn(project);
+        when(userService.getById(newReviewer.getId())).thenReturn(newReviewer);
+        when(projectStore.save(project)).thenThrow(new ObjectOptimisticLockingFailureException(Project.class, project.getId()));
+
+        assertThrows(OptimisticLockingFailureException.class, () -> workflowService.reassignReviewer(project.getId(),
+                newReviewer.getId(), TestData.actor(TestData.coordinator())));
+
         verify(events, never()).publishEvent(any(Object.class));
     }
 

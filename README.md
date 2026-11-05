@@ -232,6 +232,8 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 
 `AuditQueryTest` covers the audit query's paging defaults and bounds and its date range check, `AuditSpecificationsTest` the column each filter constrains and their combination, `AuditQueryServiceTest` the coordinator-only read, and `AuditControllerWebTest` checks `GET /api/audit`: each filter, combined filters, paging, the page envelope, invalid parameters, 403 for student and faculty and 401 without a token.
 
+`NotificationFlowTest` runs the real workflow, listener, dispatcher, retry decorator and channels in a small Spring context with a real transaction lifecycle, and checks who is notified and that nothing is sent before commit or after a rollback. `ConcurrentSubmissionWebTest` races two submissions of one project through the real security chain, controller and `WorkflowService` against a version-checking store: one gets 200 and the other `409 CONCURRENT_UPDATE`. `GlobalExceptionHandlerTest` checks that mapping directly, and `ProjectAccessPolicyTest` that a reassignment moves access from the previous to the new reviewer.
+
 ## Design patterns
 
 | Pattern | Where |
