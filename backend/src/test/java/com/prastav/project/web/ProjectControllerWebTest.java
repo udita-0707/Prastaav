@@ -41,6 +41,7 @@ import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -257,5 +258,43 @@ class ProjectControllerWebTest {
                 .andExpect(jsonPath("$.byStatus.SUBMITTED").value(2))
                 .andExpect(jsonPath("$.byStatus.DRAFT").value(0))
                 .andExpect(jsonPath("$.awaitingAssignment").value(2));
+    }
+
+    @Test
+    void repeatedStatusParametersAreAllBound() throws Exception {
+        ArgumentCaptor<ProjectListQuery> query = ArgumentCaptor.forClass(ProjectListQuery.class);
+        when(projectService.listProjects(any(Actor.class), query.capture())).thenReturn(Page.empty(PageRequest.of(0, 10)));
+
+        mockMvc.perform(get("/api/projects").param("status", "DRAFT").param("status", "APPROVED")
+                        .header("Authorization", bearer(Role.STUDENT)))
+                .andExpect(status().isOk());
+
+        assertEquals(Set.of(ProjectStatus.DRAFT, ProjectStatus.APPROVED), query.getValue().statuses());
+    }
+
+    @Test
+    void blankSearchAndBranchAreNoFilters() throws Exception {
+        ArgumentCaptor<ProjectListQuery> query = ArgumentCaptor.forClass(ProjectListQuery.class);
+        when(projectService.listProjects(any(Actor.class), query.capture())).thenReturn(Page.empty(PageRequest.of(0, 10)));
+
+        mockMvc.perform(get("/api/projects").param("q", "  ").param("branch", " ")
+                        .header("Authorization", bearer(Role.STUDENT)))
+                .andExpect(status().isOk());
+
+        assertNull(query.getValue().q());
+        assertNull(query.getValue().branch());
+    }
+
+    @Test
+    void aPagePastTheEndIsEmptyButKeepsTheTotals() throws Exception {
+        when(projectService.listProjects(any(Actor.class), any(ProjectListQuery.class)))
+                .thenAnswer(invocation -> new PageImpl<>(List.of(), invocation.<ProjectListQuery>getArgument(1).pageable(), 12));
+
+        mockMvc.perform(get("/api/projects").param("page", "5").header("Authorization", bearer(Role.STUDENT)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isEmpty())
+                .andExpect(jsonPath("$.page").value(5))
+                .andExpect(jsonPath("$.totalElements").value(12))
+                .andExpect(jsonPath("$.totalPages").value(2));
     }
 }
