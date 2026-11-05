@@ -5,7 +5,7 @@ Paths below are relative to `backend/src/main/java/com/prastav/` unless they sta
 ## Part A. Ten viva questions on the design
 
 **1. Why a modular monolith and not microservices?**
-One small team, one database and workflows that must be atomic (a status change and its audit row commit together). Microservices would turn that into distributed transactions for no benefit at this scale. The modules (`auth`, `project`, `proposal`, `review`, `workflow`, `audit`) already talk only through public services (`ProjectStore`, `ProposalService`, `UserService`, `WorkflowService`) and events, so a module could be split out later along the same seams.
+One small team, one database and workflows that must be atomic (a status change and its audit row commit together). Microservices would turn that into distributed transactions for no benefit at this scale. The modules (`auth`, `project`, `proposal`, `review`, `workflow`, `audit`, `notification`) already talk only through public services (`ProjectStore`, `ProposalService`, `UserService`, `WorkflowService`) and events, so a module could be split out later along the same seams.
 
 **2. Why the State pattern instead of a status enum with a switch?**
 Each status owns its rules in one small class (`DraftState`, `UnderReviewState`, ...). Every action in `ProjectState` is a default method that throws `IllegalTransitionException`, so anything not explicitly allowed is illegal. Adding a status adds a class instead of editing every switch (Open/Closed), and each state is unit-tested with `new DraftState()`. The same call `submit` behaves differently in `DraftState` (to SUBMITTED) and `RevisionRequestedState` (to UNDER_REVIEW): polymorphism instead of if/else. Two safety nets: `ProjectStateFactory` refuses to start if a status has no state, and the `switch` in `AllowedActionsResolver` is exhaustive, so the compiler flags a new `Action`.
@@ -17,10 +17,10 @@ Each status owns its rules in one small class (`DraftState`, `UnderReviewState`,
 A reviewer's decision must refer to exactly the text they read, and the audit trail must be trustworthy. It is enforced in three layers: `ProposalVersion.updateContent()` and `submit()` throw `ConflictException` once SUBMITTED; `ProposalService.updateDraft` first asks the state whether EDIT_DRAFT is allowed (409 otherwise); and the database trigger `trg_proposal_versions_immutable` rejects any UPDATE or DELETE on a submitted row, even from SQL. Changes after submission happen only by creating version N+1 through `ProposalVersionFactory.nextDraftFrom`.
 
 **5. Why events for auditing, and why is the audit listener synchronous?**
-The workflow should not know auditing exists (SRP), and a new side effect is a new listener, not an edit to `WorkflowService` (OCP). The listener is a plain `@EventListener`, so it runs inside the publisher's transaction: an audit row exists if and only if the change committed. `NotificationListener` instead uses `@TransactionalEventListener` (after commit) in a new transaction, because a notification must never be sent for a change that rolled back, and a failed delivery must never roll the change back. That difference is deliberate.
+The workflow should not know auditing exists (SRP), and a new side effect is a new listener, not an edit to `WorkflowService` (OCP). The listener is a plain `@EventListener`, so it runs inside the publisher's transaction: an audit row exists if and only if the change committed. `NotificationListener` instead uses `@TransactionalEventListener` (after commit) and holds no transaction itself, while each delivery attempt has its own (`REQUIRES_NEW` in `NotificationService.create`), because a notification must never be sent for a change that rolled back, and a failed delivery must never roll the change back. That difference is deliberate.
 
 **6. How do you stop two people changing the same project at the same time?**
-`Project` has `@Version Long version`. Hibernate adds `WHERE version = ?` to the update; if another transaction committed first, the update hits zero rows and Spring throws `OptimisticLockingFailureException`, which `GlobalExceptionHandler` turns into 409 `CONCURRENT_UPDATE`. If the second request arrives after the first committed, it simply loads the new status and the state refuses it with 409 `ILLEGAL_TRANSITION`. The partial unique index `ux_proposal_one_open_draft` also stops two concurrent "create revision" calls from producing two drafts.
+`Project` has `@Version Long version`. Hibernate adds `WHERE version = ?` to the update; if another transaction committed first, the update hits zero rows and Spring throws `OptimisticLockingFailureException`, which `GlobalExceptionHandler` turns into 409 `CONCURRENT_UPDATE`. If the second request arrives after the first committed, it simply loads the new status and the state refuses it with 409 `ILLEGAL_TRANSITION`. The unique indexes `uq_proposal_project_version` and `ux_proposal_one_open_draft` also stop two concurrent "create revision" calls from producing two drafts; `GlobalExceptionHandler.handleIntegrityViolation` gives the loser 409 `CONCURRENT_UPDATE`.
 
 **7. Where is authorization enforced, and why in two places?**
 Layer 1 is the role, checked at the endpoint with `@PreAuthorize` (cheap, declarative, visible in the controller). Layer 2 is ownership and assignment, which a role cannot express: "this student owns this project", "this faculty member is the assigned reviewer". That lives in `ProjectAccessPolicy` (reads and draft edits) and in `Guards` inside the state classes (transitions). Doing it in the service and domain means it also protects any future caller that is not a controller.
@@ -32,7 +32,7 @@ Layer 1 is the role, checked at the endpoint with `@PreAuthorize` (cheap, declar
 For exactly three fixed decisions a switch would work. The handler interface earns its place because each decision maps to a different workflow call with different inputs, `ReviewService` stays closed for modification when a decision is added (for example a conditional approval), and the same lookup-by-key structure fits any other per-key behaviour, such as notification channels. The cost is three tiny classes. I would not add a strategy where there is no expected variation.
 
 **10. How do you test the workflow without Spring or a database?**
-State classes, entities and `Guards` are plain Java, so tests build real objects (`TestData.projectIn(UNDER_REVIEW, owner, reviewer)`) and call the state directly. Services get their collaborators through constructors, so `WorkflowServiceTest` and `ReviewServiceTest` use Mockito mocks for `ProjectStore`, `ProposalService` and `ApplicationEventPublisher` but real states via `TestData.stateFactory()`. `ProjectStore` is the seam that makes this easy. Only `ProjectControllerWebTest` starts a Spring slice (`@WebMvcTest`) to prove JWT, `@PreAuthorize` and error mapping.
+State classes, entities and `Guards` are plain Java, so tests build real objects (`TestData.projectIn(UNDER_REVIEW, owner, reviewer)`) and call the state directly. Services get their collaborators through constructors, so `WorkflowServiceTest` and `ReviewServiceTest` use Mockito mocks for `ProjectStore`, `ProposalService` and `ApplicationEventPublisher` but real states via `TestData.stateFactory()`. `ProjectStore` is the seam that makes this easy. Only the `*ControllerWebTest` classes and `ConcurrentSubmissionWebTest` start a Spring slice (`@WebMvcTest`) to prove JWT, `@PreAuthorize` and error mapping, and `NotificationFlowTest` uses a small Spring context for the after-commit path.
 
 ## Part B. Exactly which files to change
 
@@ -48,10 +48,10 @@ State classes, entities and `Guards` are plain Java, so tests build real objects
 | `workflow/WorkflowService.java` | add `hold(UUID, Actor, String)` and `resume(UUID, Actor)` using the private `transition(...)` |
 | `workflow/AllowedActionsResolver.java` | add `case HOLD, RESUME -> actor.hasRole(Role.COORDINATOR);` (the compiler forces this because the switch is exhaustive) |
 | `project/web/ProjectController.java` | `POST /api/projects/{id}/hold` and `/resume` with `@PreAuthorize("hasRole('COORDINATOR')")` |
-| `backend/src/main/resources/db/migration/V5__on_hold_status.sql` (new) | `ALTER TABLE projects DROP CONSTRAINT projects_status_check;` then add it back including `'ON_HOLD'` |
+| `backend/src/main/resources/db/migration/V7__on_hold_status.sql` (new) | `ALTER TABLE projects DROP CONSTRAINT projects_status_check;` then add it back including `'ON_HOLD'` |
 | `backend/src/test/java/com/prastav/support/TestData.java` | add `new OnHoldState()` to `stateFactory()` (otherwise the factory fails fast, by design) |
 | `backend/src/test/java/com/prastav/workflow/OnHoldStateTest.java` (new) | resume legal for coordinator; everything else illegal; UnderReviewState hold tests |
-| `frontend/src/api/types.ts`, `components/labels.ts`, `components/StatusBadge` CSS in `styles.css`, `components/WorkflowRail.tsx`, `pages/ProjectDetailPage.tsx` | new status and action, badge colour, buttons |
+| `frontend/src/api/types.ts`, `components/labels.ts`, `components/ui/StatusPill.tsx`, `components/WorkflowRail.tsx`, `pages/ProjectDetailPage.tsx` | new status and action, pill colour (`Record<ProjectStatus, ...>` makes TypeScript flag the label and the pill), buttons |
 | `docs/uml/04_project_state.puml`, `docs/diagrams.md`, `docs/LLD.md` section 2.3 | diagram and table |
 
 Nothing in `AuditEventListener` changes: HOLD and RESUME fall into STATUS_CHANGED.
@@ -61,15 +61,16 @@ Nothing in `AuditEventListener` changes: HOLD and RESUME fall into STATUS_CHANGE
 | File | Change |
 |---|---|
 | `auth/Role.java` | add `REVIEW_COMMITTEE` |
-| `backend/src/main/resources/db/migration/V5__review_committee_role.sql` (new) | replace `users_role_check` to include the new value |
-| `project/ProjectService.java` | `listProjects` switch: `case REVIEW_COMMITTEE -> projectRepository.findAllByOrderByUpdatedAtDesc();` (compiler forces a case) |
+| `backend/src/main/resources/db/migration/V7__review_committee_role.sql` (new) | replace `users_role_check` to include the new value |
+| `project/ProjectSpecifications.java` | `visibleTo` switch: `case REVIEW_COMMITTEE -> (root, query, cb) -> cb.conjunction();` (the compiler forces a case) |
+| `project/ProjectService.java` | `countProjects` switch: `case REVIEW_COMMITTEE -> projectRepository.countByStatus();` (the compiler forces a case) |
 | `project/ProjectAccessPolicy.java` | `canView` returns true for `REVIEW_COMMITTEE` |
 | `auth/AuthService.java` | keep it out of self-registration (same rule as COORDINATOR) |
 | `auth/DemoDataSeeder.java` | seed one committee member |
 | controllers | only endpoints the role may call change, e.g. `@PreAuthorize("hasAnyRole('COORDINATOR','REVIEW_COMMITTEE')")` on `UserController.list` if needed |
 | `workflow/AllowedActionsResolver.java` | no change: the committee has no actions, so it gets an empty list |
-| `frontend/src/api/types.ts`, `components/labels.ts` (`ROLE_LABEL`), `pages/ProjectsPage.tsx` (`HEADING`, `EMPTY`) | `Record<Role, ...>` makes TypeScript flag every place |
-| tests | `ProjectServiceTest.listIsScopedByRole`, a policy test for `canView` |
+| `frontend/src/api/types.ts`, `components/labels.ts` (`ROLE_LABEL`), `pages/ProjectsPage.tsx` (`HEADING`), `config/navigation.ts` (`NAV_ITEMS`, `SEARCH_PLACEHOLDER`), `pages/LoginPage.tsx` (`DEMO_ICON`), `pages/HomePage.tsx` | `Record<Role, ...>` makes TypeScript flag every place |
+| tests | `ProjectSpecificationsTest` (a new role scope), `ProjectAccessPolicyTest` (`canView`) |
 
 ### B3. Two reviewers must approve before a project is APPROVED
 
@@ -77,7 +78,7 @@ Design: a second strategy, `ApprovalPolicy`, decides whether an APPROVE decision
 
 | File | Change |
 |---|---|
-| `backend/src/main/resources/db/migration/V5__project_reviewers.sql` (new) | table `project_reviewers(project_id, reviewer_id, PRIMARY KEY(...))`, migrate existing `reviewer_id` rows, keep or drop the column |
+| `backend/src/main/resources/db/migration/V7__project_reviewers.sql` (new) | table `project_reviewers(project_id, reviewer_id, PRIMARY KEY(...))`, migrate existing `reviewer_id` rows, keep or drop the column |
 | `project/Project.java` | `@ManyToMany Set<User> reviewers`; `assignReviewer` adds; `isReviewedBy` checks the set; `getReviewers()` |
 | `workflow/SubmittedState.java` | allow assignment until two reviewers are set; move to UNDER_REVIEW when the second is added (or accept a list in one call) |
 | `workflow/ApprovalPolicy.java` (new interface) | `boolean isSatisfied(Project project, long approvalsOnLatestVersion)` |
@@ -106,7 +107,7 @@ Version 1 is the original submission, so versions 2, 3 and 4 are the three resub
 
 How it works today (LLD section 2.4.1):
 
-1. `notification/NotificationListener.java` is a `@TransactionalEventListener` (after commit, with no transaction of its own) on `ProjectStatusChangedEvent` and `ReviewRecordedEvent`: ASSIGN_REVIEWER notifies the reviewer, a SUBMIT out of REVISION_REQUESTED notifies the reviewer, every review decision notifies the student owner.
+1. `notification/NotificationListener.java` is a `@TransactionalEventListener` (after commit, with no transaction of its own) on `ProjectStatusChangedEvent`, `ReviewerReassignedEvent` and `ReviewRecordedEvent`: ASSIGN_REVIEWER notifies the reviewer, a SUBMIT out of REVISION_REQUESTED notifies the reviewer, every review decision notifies the student owner.
 2. It calls `NotificationDispatcher.dispatch`, which runs every channel named in `prastav.notification.enabled-channels`, each wrapped in `RetryingNotificationChannel`.
 3. `InAppNotificationChannel` stores the row through `NotificationService.create`, which has its own `REQUIRES_NEW` transaction and flushes, so a failing insert is retried; `EmailNotificationChannel` writes the email to the log.
 4. `notification/web/NotificationController.java` serves the caller's inbox: `GET /api/notifications`, `GET /api/notifications/unread-count`, `PATCH /api/notifications/{id}/read`, `PATCH /api/notifications/read-all`.
