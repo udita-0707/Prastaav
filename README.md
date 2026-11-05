@@ -234,6 +234,8 @@ Unit tests cover every workflow state (legal and illegal transitions), `ProjectS
 
 `NotificationFlowTest` runs the real workflow, listener, dispatcher, retry decorator and channels in a small Spring context with a real transaction lifecycle, and checks who is notified and that nothing is sent before commit or after a rollback. `ConcurrentSubmissionWebTest` races two submissions of one project through the real security chain, controller and `WorkflowService` against a version-checking store: one gets 200 and the other `409 CONCURRENT_UPDATE`. `GlobalExceptionHandlerTest` checks that mapping directly, and `ProjectAccessPolicyTest` that a reassignment moves access from the previous to the new reviewer.
 
+`ProjectSortTest` covers every list order and its id tie-break. `ProjectSpecificationsTest`, `ProposalDiffServiceTest` and `DashboardServiceTest` also cover each list filter alone and combined, that a reviewer filter cannot widen a role's scope, literal wildcards in search, version comparison with empty fields and missing versions, and a dashboard with no projects. The tests run without a database, so the JPQL of the grouped dashboard queries runs only against PostgreSQL in the running application.
+
 ## Design patterns
 
 | Pattern | Where |
