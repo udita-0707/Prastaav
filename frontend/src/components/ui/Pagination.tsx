@@ -34,7 +34,7 @@ export function Pagination({ page, size, total, onChange }: PaginationProps) {
         <span className="font-semibold text-ink">{total}</span>
       </p>
       {count > 1 && (
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <button type="button" className={clsx(button, 'text-ink hover:bg-slate-100 disabled:opacity-40')} onClick={() => onChange(page - 1)} disabled={page === 0} aria-label="Previous page">
             <ChevronLeft className="h-4 w-4" aria-hidden />
           </button>

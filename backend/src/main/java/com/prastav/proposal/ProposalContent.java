@@ -1,5 +1,6 @@
 package com.prastav.proposal;
 
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
@@ -12,7 +13,9 @@ public record ProposalContent(
         @Size(max = 4000) String methodology,
         @Size(max = 4000) String expectedOutcome,
         @Size(max = 2000) String timeline,
-        @Size(max = 500) String referenceLink) {
+        @Size(max = 500)
+        @Pattern(regexp = "(?i)^$|^https?://\\S+$", message = "must be a full link starting with http:// or https://")
+        String referenceLink) {
 
     public static ProposalContent empty() {
         return new ProposalContent(null, null, null, null, null, null);

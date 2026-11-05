@@ -2,7 +2,7 @@ const AVATAR_COLORS = [
   'bg-brand-600 text-white',
   'bg-accent-600 text-white',
   'bg-violet-600 text-white',
-  'bg-amber-600 text-white',
+  'bg-amber-700 text-white',
   'bg-rose-600 text-white',
   'bg-sky-700 text-white',
   'bg-green-700 text-white',

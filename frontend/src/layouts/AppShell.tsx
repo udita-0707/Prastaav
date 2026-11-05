@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import { ChevronDown, LogOut, Menu, Search, X } from 'lucide-react';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, Outlet, ScrollRestoration, useLocation, useNavigate } from 'react-router-dom';
 import type { UserResponse } from '../api/types';
 import { illustrations } from '../assets';
@@ -68,7 +68,7 @@ function GlobalSearch({ user }: { user: UserResponse }) {
     navigate(term ? `/app/projects?q=${encodeURIComponent(term)}` : '/app/projects');
   };
   return (
-    <form role="search" onSubmit={submit} className="relative w-full max-w-xl">
+    <form role="search" aria-label="Project search" onSubmit={submit} className="relative w-full max-w-xl">
       <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden />
       <input
         type="search"
@@ -76,7 +76,7 @@ function GlobalSearch({ user }: { user: UserResponse }) {
         onChange={(e) => setQ(e.target.value)}
         placeholder={SEARCH_PLACEHOLDER[user.role]}
         aria-label="Search projects"
-        className="h-11 w-full rounded-field border border-line bg-white pl-11 pr-4 text-sm text-ink placeholder:text-slate-400 focus:border-brand-500 focus:shadow-focus focus:outline-none"
+        className="h-11 w-full truncate rounded-field border border-line bg-white pl-11 pr-4 text-sm text-ink placeholder:text-slate-400 focus:border-brand-500 focus:shadow-focus focus:outline-none"
       />
     </form>
   );
@@ -88,13 +88,30 @@ export function AppShell() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [drawer, setDrawer] = useState(false);
+  const drawerPanel = useRef<HTMLElement>(null);
+  const drawerOpener = useRef<HTMLButtonElement>(null);
 
   useEffect(() => setDrawer(false), [pathname]);
+  // While the drawer is open, focus stays inside it; closing it returns focus to the menu button.
   useEffect(() => {
     if (!drawer) return;
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setDrawer(false);
+    const opener = drawerOpener.current;
+    drawerPanel.current?.querySelector<HTMLElement>('button')?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDrawer(false);
+      if (event.key !== 'Tab' || !drawerPanel.current) return;
+      const nodes = [...drawerPanel.current.querySelectorAll<HTMLElement>('a[href], button')];
+      const edge = event.shiftKey ? nodes[0] : nodes[nodes.length - 1];
+      if (document.activeElement === edge) {
+        event.preventDefault();
+        (event.shiftKey ? nodes[nodes.length - 1] : nodes[0]).focus();
+      }
+    };
     document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      opener?.focus();
+    };
   }, [drawer]);
 
   if (!user) return null;
@@ -105,14 +122,14 @@ export function AppShell() {
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[70] focus:rounded-lg focus:bg-white focus:px-4 focus:py-2 focus:shadow-pop">
         Skip to content
       </a>
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-line bg-white/90 backdrop-blur lg:block">
+      <aside aria-label="Sidebar" className="fixed inset-y-0 left-0 z-30 hidden w-64 border-r border-line bg-white/90 backdrop-blur lg:block">
         <Sidebar user={user} />
       </aside>
 
       {drawer && (
         <div className="fixed inset-0 z-40 lg:hidden" role="dialog" aria-modal="true" aria-label="Navigation">
           <div className="absolute inset-0 bg-ink/40" onClick={() => setDrawer(false)} aria-hidden />
-          <aside className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-white shadow-pop">
+          <aside ref={drawerPanel} aria-label="Sidebar" className="absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-white shadow-pop">
             <button type="button" onClick={() => setDrawer(false)} className="absolute right-3 top-6 rounded-lg p-2 text-slate-500 hover:bg-slate-100" aria-label="Close navigation">
               <X className="h-5 w-5" aria-hidden />
             </button>
@@ -123,7 +140,7 @@ export function AppShell() {
 
       <header className="sticky top-0 z-20 border-b border-line/80 bg-white/80 backdrop-blur">
         <div className="mx-auto flex h-[72px] max-w-canvas items-center gap-3 px-4 sm:px-6 lg:px-8">
-          <button type="button" onClick={() => setDrawer(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" aria-label="Open navigation">
+          <button ref={drawerOpener} type="button" onClick={() => setDrawer(true)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" aria-label="Open navigation">
             <Menu className="h-5 w-5" aria-hidden />
           </button>
           <GlobalSearch user={user} />
@@ -135,7 +152,7 @@ export function AppShell() {
               trigger={
                 <>
                   <Avatar name={user.name} />
-                  <span className="hidden text-left sm:block">
+                  <span className="sr-only text-left sm:not-sr-only sm:block">
                     <span className="block text-sm font-semibold text-ink">{user.name}</span>
                     <span className="block text-xs text-muted">{ROLE_LABEL[user.role]}</span>
                   </span>

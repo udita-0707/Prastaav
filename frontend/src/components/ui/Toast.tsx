@@ -20,7 +20,7 @@ const ToastContext = createContext<ToastApi | null>(null);
 const ICON = { success: CheckCircle2, error: XCircle, info: Info } as const;
 const TONE = { success: 'text-green-600', error: 'text-rose-600', info: 'text-accent-600' } as const;
 
-/** Success and info toasts go to a polite live region; errors are announced assertively. */
+/** Success and info toasts go to a polite live region; errors are announced assertively. Shown under the top bar, clear of the buttons at the end of a form. */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const nextId = useRef(1);
@@ -41,7 +41,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={api}>
       {children}
-      <div className="pointer-events-none fixed inset-x-4 bottom-4 z-[60] flex flex-col items-end gap-2 sm:left-auto sm:right-6 sm:w-96">
+      <div className="pointer-events-none fixed inset-x-4 top-20 z-[60] flex flex-col items-end gap-2 sm:left-auto sm:right-6 sm:w-96">
         {(['polite', 'assertive'] as const).map((politeness) => (
           <div key={politeness} aria-live={politeness} className="flex w-full flex-col gap-2">
             {toasts

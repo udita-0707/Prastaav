@@ -33,6 +33,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -58,6 +59,19 @@ class ProposalControllerWebTest {
 
     private String bearer(Role role) {
         return "Bearer " + jwtService.generateToken(new User("Test " + role, role + "@prastav.edu", "hash", role));
+    }
+
+    @Test
+    void aScriptReferenceLinkIs400WithoutCallingTheService() throws Exception {
+        mockMvc.perform(put("/api/projects/{id}/proposal", projectId)
+                        .header("Authorization", bearer(Role.STUDENT))
+                        .contentType("application/json")
+                        .content("{\"referenceLink\":\"javascript:alert(1)\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("referenceLink"));
+
+        verifyNoInteractions(proposalService);
     }
 
     @Test

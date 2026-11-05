@@ -43,7 +43,7 @@ export function DashboardPage() {
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <Card className="p-5 sm:p-6">
           <CardHeader title="Waiting for assignment" description="Submitted projects without a reviewer, the longest-waiting first." />
           <ul className="mt-4 space-y-3">
@@ -74,12 +74,14 @@ export function DashboardPage() {
               <li key={reviewer.id}>
                 <Link
                   to={`/app/projects?status=UNDER_REVIEW&reviewerId=${reviewer.id}`}
-                  aria-label={`${reviewer.name}: ${openReviews} under review`}
                   className="group flex items-center gap-3 rounded-xl p-2.5 hover:bg-slate-50"
                 >
                   <Avatar name={reviewer.name} size="sm" />
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{reviewer.name}</span>
-                  <span className="text-lg font-bold tabular-nums text-ink">{openReviews}</span>
+                  <span className="text-lg font-bold tabular-nums text-ink">
+                    {openReviews}
+                    <span className="sr-only"> under review</span>
+                  </span>
                   <ChevronRight className="h-4 w-4 text-slate-400 transition-transform group-hover:translate-x-0.5" aria-hidden />
                 </Link>
               </li>

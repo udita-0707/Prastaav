@@ -131,7 +131,7 @@ All seeded accounts are fictional people and share one password, `prastav.seed.d
 2. Sign in as **coordinator@nst.rishihood.edu.in**, open **Assign Faculty**, choose **Dr. Anita Rao** for the project.
 3. Sign in as **anita.rao@nst.rishihood.edu.in**, open the project from **Awaiting your review**, choose **Request changes**, write a comment and **Record decision**.
 4. As the student: read the feedback, **Start version 2**, edit it with the feedback panel open, then **Resubmit v2**. The Versions tab shows v1 unchanged.
-5. As the faculty member: **Approve**.
+5. As the faculty member: choose **Approve**, then **Record decision**.
 6. In Swagger: `GET /api/projects/{id}/history` shows every step; `POST /api/projects/{id}/reviews` with `{"decision":"APPROVE"}` on a project that is only SUBMITTED returns **409 ILLEGAL_TRANSITION**.
 
 ## Run it
@@ -238,7 +238,7 @@ scripts/smoke.sh                           # end-to-end flow against a running b
 scripts/docs/run_all.sh                    # docs against code and diagrams against each other; needs python3
 ```
 
-The backend has **321 tests** in 41 test classes. The frontend has no automated tests; `npm run build` type-checks it. Because the backend tests use no database, JPQL, Flyway migrations and the real `@Version` column run only in the application itself.
+The backend has **334 tests** in 42 test classes. The frontend has no automated tests; `npm run build` type-checks it. Because the backend tests use no database, JPQL, Flyway migrations and the real `@Version` column run only in the application itself.
 
 Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService` (including reviewer reassignment: allowed, wrong state, wrong role, same reviewer, event published), `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `DashboardService` (coordinator summary from the grouped queries, other roles 403), `ProjectListQuery` (paging defaults and bounds), `ProjectSpecifications` (role scope and filters), the audit listener (including the reassignment entry), `PatternEmailPolicy` (with the shipped configuration), registration in `AuthService`, account creation in `UserService` and `NotificationService` (inbox scoping, paging bounds, unread count, read ownership), `NotificationListener` (who is notified for an assignment, a resubmission, a reassignment and each review decision, and that other status changes notify nobody), `NotificationDispatcher` (enabled channels in order, a failing channel does not stop the others, disabled channels skipped), `RetryingNotificationChannel` (no retry on success, success on a later attempt, gives up after max attempts) and the in-app and email channels. `UserControllerWebTest` checks the coordinator-only `POST /api/users`. `DashboardControllerWebTest` checks `GET /api/dashboard/summary`: 200 for the coordinator, 403 for student and faculty, 401 without a token. `NotificationControllerWebTest` checks that every role reaches only its own inbox, the paging parameters and envelope, and the 400, 401, 403 and 404 responses. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters, the page envelope, invalid list parameters, the summary endpoint and the coordinator-only reassignment.
 

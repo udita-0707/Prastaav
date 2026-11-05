@@ -1,17 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, Check, ChevronDown, Code2, FilePlus2, MessageSquareText, RotateCcw, Save, Send, UsersRound } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { Link, useBlocker, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { errorMessage } from '../api/client';
 import { createProject, getProject, listReviews, submitProject, updateDraft } from '../api/endpoints';
 import type { ProjectDetailResponse, ProposalContent } from '../api/types';
 import { ErrorNote } from '../components/ErrorNote';
-import { EMPTY_PROPOSAL, ProposalFields, ProposalView, REQUIRED_TO_SUBMIT } from '../components/ProposalFields';
+import { ProjectLoadError } from '../components/ProjectLoadError';
+import { EMPTY_PROPOSAL, isWebLink, ProposalFields, ProposalView, REQUIRED_TO_SUBMIT } from '../components/ProposalFields';
 import { Button, ButtonLink, Card, EmptyState, IconTile, Input, Modal, Skeleton, Stepper, Textarea, useToast } from '../components/ui';
 import { DECISION_LABEL, FIELD_LABEL } from '../components/labels';
 import { formatDateTime, formatTime } from '../lib/format';
 import { parseTeam } from '../lib/people';
 import { useDocumentTitle } from '../lib/useDocumentTitle';
+import { isRefusedAction, useRefusedAction } from '../lib/useRefusedAction';
 
 const STEPS = ['Basic Info', 'Problem & Objectives', 'Methodology & Outcomes', 'Timeline & Review'];
 const STEP_FIELDS: (keyof ProposalContent)[][] = [[], ['problemStatement', 'objectives'], ['methodology', 'expectedOutcome'], ['timeline', 'referenceLink']];
@@ -19,6 +21,7 @@ const TITLE_MAX = 100;
 const DESCRIPTION_MAX = 300;
 const TECH_MAX = 500;
 const TEAM_MAX = 10;
+const LINK_STEP = 3;
 
 interface Basics {
   title: string;
@@ -69,13 +72,7 @@ function validateProposal(proposal: ProposalContent, keys: (keyof ProposalConten
   for (const key of keys) {
     const text = proposal[key]?.trim() ?? '';
     if (key === 'referenceLink') {
-      if (text) {
-        try {
-          new URL(text);
-        } catch {
-          errors.referenceLink = 'Enter a full link starting with https://';
-        }
-      }
+      if (text && !isWebLink(text)) errors.referenceLink = 'Enter a full link starting with https://';
     } else if (REQUIRED_TO_SUBMIT.includes(key) && !text) {
       errors[key] = `${FIELD_LABEL[key]} is needed before you can submit.`;
     }
@@ -95,6 +92,7 @@ export function ProjectWizardPage() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const onRefused = useRefusedAction(id);
   const [searchParams, setSearchParams] = useSearchParams();
   const step = Math.min(Math.max(Number(searchParams.get('step') ?? 1) || 1, 1), STEPS.length) - 1;
 
@@ -114,6 +112,7 @@ export function ProjectWizardPage() {
   const [feedbackOpen, setFeedbackOpen] = useState(true);
   const loaded = useRef(false);
   const leaving = useRef(false);
+  const createdId = useRef<string | null>(null);
 
   useDocumentTitle(isEdit ? (project.data ? `Edit ${project.data.title}` : 'Edit draft') : 'Create project');
 
@@ -129,13 +128,15 @@ export function ProjectWizardPage() {
 
   const dirty = useMemo(() => JSON.stringify({ basics, proposal }) !== snapshot, [basics, proposal, snapshot]);
 
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && !leaving.current && currentLocation.pathname !== nextLocation.pathname);
+  // Once the draft is gone there is nothing to keep, so nothing should ask before leaving.
+  const noOpenDraft = isEdit && Boolean(project.data) && (!project.data?.allowedActions.includes('EDIT_DRAFT') || project.data?.currentProposal?.state !== 'DRAFT');
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && !noOpenDraft && !leaving.current && currentLocation.pathname !== nextLocation.pathname);
   useEffect(() => {
-    if (!dirty) return;
+    if (!dirty || noOpenDraft) return;
     const onBeforeUnload = (event: BeforeUnloadEvent) => event.preventDefault();
     window.addEventListener('beforeunload', onBeforeUnload);
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
-  }, [dirty]);
+  }, [dirty, noOpenDraft]);
 
   const goToStep = (index: number) => {
     setErrors({});
@@ -152,7 +153,16 @@ export function ProjectWizardPage() {
         if (step !== 0) goToStep(0);
         throw new ClientValidationError('Add a title and a short description on step 1 before saving.');
       }
+    }
+    const linkErrors = validateProposal(proposal, ['referenceLink']);
+    if (Object.keys(linkErrors).length > 0) {
+      if (step !== LINK_STEP) goToStep(LINK_STEP);
+      setErrors(linkErrors);
+      throw new ClientValidationError('Correct the reference link before saving.');
+    }
+    if (!id) {
       const created = await createProject({ ...basics, title: basics.title.trim(), description: basics.description.trim(), proposal: toPayload(proposal) });
+      createdId.current = created.id;
       return created.id;
     }
     await updateDraft(id, toPayload(proposal));
@@ -179,6 +189,7 @@ export function ProjectWizardPage() {
       setSavedAt(now);
       setSnapshot(JSON.stringify({ basics, proposal }));
     },
+    onError: onRefused,
   });
 
   const submit = useMutation({
@@ -194,7 +205,17 @@ export function ProjectWizardPage() {
       leaving.current = true;
       navigate(`/app/projects/${projectId}`);
     },
-    onError: () => setConfirmSubmit(false),
+    onError: (error) => {
+      setConfirmSubmit(false);
+      onRefused(error);
+      // The project exists even though the submit failed: move to its edit page, so trying again cannot create a second one.
+      if (!id && createdId.current) {
+        afterSave(createdId.current);
+        toast.show({ tone: 'error', title: 'Draft saved, but not submitted', description: errorMessage(error) });
+        leaving.current = true;
+        navigate(`/app/projects/${createdId.current}/edit?step=${step + 1}`, { replace: true, state: { savedAt: new Date().toISOString() } });
+      }
+    },
   });
 
   const next = () => {
@@ -226,10 +247,10 @@ export function ProjectWizardPage() {
       </Card>
     );
   }
-  if (isEdit && project.error) return <ErrorNote message={errorMessage(project.error)} onRetry={() => project.refetch()} />;
+  if (isEdit && project.error) return <ProjectLoadError error={project.error} onRetry={() => project.refetch()} />;
 
   const draft = project.data?.currentProposal;
-  if (isEdit && (!project.data?.allowedActions.includes('EDIT_DRAFT') || draft?.state !== 'DRAFT')) {
+  if (noOpenDraft) {
     return (
       <Card>
         <EmptyState
@@ -246,6 +267,10 @@ export function ProjectWizardPage() {
   }
 
   const canSubmit = !isEdit || Boolean(project.data?.allowedActions.includes('SUBMIT'));
+  // The second click of a double click would land on the next step's button, which is in the same place.
+  const ignoreSecondClick = (event: MouseEvent) => {
+    if (event.detail > 1) event.preventDefault();
+  };
   const versionNumber = draft?.versionNumber ?? 1;
   const latestFeedback = reviews.data?.filter((r) => r.decision === 'REQUEST_REVISION').at(-1);
   const teamCount = parseTeam(basics.teamMembers).length;
@@ -393,7 +418,7 @@ export function ProjectWizardPage() {
           )}
 
           <div className="mt-6">
-            <ErrorNote message={mutationError ? (mutationError instanceof ClientValidationError ? mutationError.message : errorMessage(mutationError)) : null} />
+            <ErrorNote message={mutationError && !isRefusedAction(mutationError) ? (mutationError instanceof ClientValidationError ? mutationError.message : errorMessage(mutationError)) : null} />
           </div>
 
           <div className="mt-8 flex flex-col-reverse gap-4 border-t border-line pt-6 sm:flex-row sm:items-center sm:justify-between">
@@ -416,12 +441,12 @@ export function ProjectWizardPage() {
                 </Button>
               )}
               {step < STEPS.length - 1 ? (
-                <Button type="submit" disabled={busy} trailingIcon={<ArrowRight className="h-4 w-4" aria-hidden />}>
+                <Button type="submit" disabled={busy} onClick={ignoreSecondClick} trailingIcon={<ArrowRight className="h-4 w-4" aria-hidden />}>
                   Next
                 </Button>
               ) : (
                 canSubmit && (
-                  <Button type="submit" variant="gradient" disabled={busy} icon={<Send className="h-4 w-4" aria-hidden />}>
+                  <Button type="submit" variant="gradient" disabled={busy} onClick={ignoreSecondClick} icon={<Send className="h-4 w-4" aria-hidden />}>
                     {isRevision ? `Resubmit v${versionNumber}` : 'Submit proposal'}
                   </Button>
                 )

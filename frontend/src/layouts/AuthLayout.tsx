@@ -15,15 +15,15 @@ const POINTS = [
 export function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <div className="mx-auto grid min-h-screen max-w-canvas items-center gap-10 px-4 py-8 sm:px-8 lg:grid-cols-[1fr_minmax(0,34rem)] lg:gap-16 lg:px-16">
-      <div className="flex flex-col">
+      <header className="flex flex-col">
         <Link to="/" className="self-start rounded-lg" aria-label={`${PRODUCT_NAME} home`}>
           <Logo size="lg" />
         </Link>
         <div className="mt-10 hidden lg:block">
-          <h1 className="text-5xl font-extrabold leading-[1.1] tracking-tight text-ink">
+          <p className="text-5xl font-extrabold leading-[1.1] tracking-tight text-ink">
             Turn ideas into
             <span className="block bg-brand-text bg-clip-text text-transparent">impactful projects</span>
-          </h1>
+          </p>
           <p className="mt-6 max-w-lg text-lg leading-relaxed text-muted">
             One place for students, faculty and coordinators to write project proposals, review them and see every decision.
           </p>
@@ -40,7 +40,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
           <img src={illustrations.studentLaptop} alt="" className="mt-10 w-full max-w-md" />
           <p className="mt-4 text-sm font-semibold text-brand-700">{TAGLINE}</p>
         </div>
-      </div>
+      </header>
       <main className="w-full">{children}</main>
     </div>
   );

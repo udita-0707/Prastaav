@@ -35,7 +35,7 @@ export function StatCard({ label, value, icon, tone = 'teal', hint, loading, to 
       </IconTile>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium leading-tight text-muted">{label}</p>
-        {loading ? <Skeleton className="mt-2 h-8 w-12" /> : <p className="mt-1 text-3xl font-bold tabular-nums text-ink">{value ?? 0}</p>}
+        {loading ? <Skeleton className="mt-2 h-8 w-12" /> : <p className="mt-1 text-3xl font-bold tabular-nums text-ink">{value ?? '—'}</p>}
         {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
       </div>
       {to && <ChevronRight className="h-5 w-5 text-slate-400 transition-transform group-hover:translate-x-0.5" aria-hidden />}
@@ -47,7 +47,7 @@ export function StatCard({ label, value, icon, tone = 'teal', hint, loading, to 
     to && 'transition-shadow hover:shadow-pop',
   );
   return to ? (
-    <Link to={to} className={className} aria-label={`${label}: ${value ?? 0}`}>
+    <Link to={to} className={className}>
       {body}
     </Link>
   ) : (

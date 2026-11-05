@@ -26,6 +26,7 @@ interface DataTableProps<T> {
 
 /** Sticky header, horizontal scroll on narrow screens, skeleton rows while loading. */
 export function DataTable<T>({ columns, rows, rowKey, loading, empty, caption, maxHeight, minWidth = '720px' }: DataTableProps<T>) {
+  if (!loading && !rows) return null;
   if (!loading && rows && rows.length === 0 && empty) return <>{empty}</>;
   return (
     <div className="overflow-auto rounded-xl border border-line/80" style={maxHeight ? { maxHeight } : undefined}>

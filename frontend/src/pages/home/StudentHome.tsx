@@ -65,7 +65,7 @@ export function StudentHome({ user }: { user: UserResponse }) {
           <MessageSquareWarning className="h-6 w-6 shrink-0 text-rose-600" aria-hidden />
           <div className="min-w-0 flex-1">
             <p className="font-semibold text-rose-900">
-              {changes.data.items.length === 1 ? 'Your reviewer requested changes' : `Reviewers requested changes on ${changes.data.items.length} projects`}
+              {changes.data.total === 1 ? 'Your reviewer requested changes' : `Reviewers requested changes on ${changes.data.total} projects`}
             </p>
             <ul className="mt-1 space-y-0.5 text-sm text-rose-800">
               {changes.data.items.map((p) => (

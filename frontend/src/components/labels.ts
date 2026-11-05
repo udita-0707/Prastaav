@@ -11,7 +11,7 @@ export const STATUS_LABEL: Record<ProjectStatus, string> = {
 
 export const DECISION_LABEL: Record<ReviewDecision, string> = {
   APPROVE: 'Approved',
-  REQUEST_REVISION: 'Revision requested',
+  REQUEST_REVISION: 'Changes requested',
   REJECT: 'Rejected',
 };
 

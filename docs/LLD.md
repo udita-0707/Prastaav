@@ -124,8 +124,8 @@ The institution is configuration, not code. `InstitutionProperties` binds `prast
 | Optimistic locking on `Project` | `@Version Long version`, `CONCURRENT_UPDATE` mapping |
 | Swagger UI with Bearer auth | `OpenApiConfig`, `/swagger-ui.html` |
 | `allowedActions` in project detail | `AllowedActionsResolver`, `ProjectDetailResponse.allowedActions` |
-| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment, coordinator dashboard, audit query, notification flow, concurrent updates | 321 tests in `backend/src/test/java` (see section 12) |
-| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, coordinator dashboard, account creation, notification inbox, audit log) | `ProjectControllerWebTest` (23 tests), `DashboardControllerWebTest` (6 tests), `ProposalControllerWebTest` (8 tests), `UserControllerWebTest` (5 tests), `AuthControllerWebTest` (2 tests), `NotificationControllerWebTest` (12 tests), `AuditControllerWebTest` (20 tests), `ConcurrentSubmissionWebTest` (4 tests) |
+| Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment, coordinator dashboard, audit query, notification flow, concurrent updates | 334 tests in `backend/src/test/java` (see section 12) |
+| MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, coordinator dashboard, account creation, notification inbox, audit log) | `ProjectControllerWebTest` (23 tests), `DashboardControllerWebTest` (6 tests), `ProposalControllerWebTest` (9 tests), `UserControllerWebTest` (5 tests), `AuthControllerWebTest` (2 tests), `NotificationControllerWebTest` (12 tests), `AuditControllerWebTest` (20 tests), `ConcurrentSubmissionWebTest` (4 tests) |
 | React UI for three roles | `frontend/src` |
 | PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
 
@@ -2366,7 +2366,7 @@ The web app (`frontend/`, artifact `prastav-frontend`) is a React 18 + TypeScrip
 | `/app/assign` | `AssignPage` (Submitted projects) | `RequireAuth roles=[COORDINATOR]` |
 | `/app/notifications` | `NotificationsPage` (the caller's whole inbox) | `RequireAuth` (the API scopes the inbox to the caller) |
 
-`RequireAuth` sends an anonymous visitor to `/login` with the requested path in the navigation state, so signing in returns there; a wrong role goes to `/app`. Route guards only shape navigation: every rule is enforced again by the API.
+`RequireAuth` sends an anonymous visitor to `/login` with the requested path in the navigation state, so signing in returns there; a wrong role sees a "no access" page with a link home and the URL unchanged. A token the API refuses (401) ends the session and opens `/login` with a notice, then returns to the same page after signing in. Route guards only shape navigation: every rule is enforced again by the API.
 
 #### 2.7.2 Layouts and component structure
 
@@ -2374,11 +2374,11 @@ The web app (`frontend/`, artifact `prastav-frontend`) is a React 18 + TypeScrip
 |---|---|
 | `src/layouts/` | `AppShell`: sidebar with role navigation from `config/navigation.ts` (a drawer below the `lg` breakpoint), top bar with global search (navigates to `/app/projects?q=`), `NotificationBell` and the account menu; `AuthLayout`: split layout for sign in and registration |
 | `src/components/ui/` | Design system: `Button`, `Input`/`Textarea`/`Select`, `Card`, `StatCard`, `StatusPill`, `Avatar`/`AvatarStack`, `DataTable`, `Pagination`, `FilterBar`, `Tabs`, `Stepper`, `DropdownMenu`, `Modal`, `ToastProvider`, `Skeleton`, `EmptyState`, `PageHeader`, `CtaBand`, `Logo` |
-| `src/components/` | Domain components: `WorkflowRail`, `ReviewPanel`, `AssignReviewerPanel`, `NotificationBell` (unread badge and a dropdown of the latest five), `NotificationItem` (one inbox row, shared by the dropdown and the page), `ProposalFields`/`ProposalView`, `VersionCompare` (two version pickers, every field side by side, changed fields highlighted), `ErrorNote`, and the label maps in `labels.ts` (including the timeline entry types) |
+| `src/components/` | Domain components: `WorkflowRail`, `ReviewPanel`, `AssignReviewerPanel`, `NotificationBell` (unread badge and a dropdown of the latest five), `NotificationItem` (one inbox row, shared by the dropdown and the page), `ProposalFields`/`ProposalView`, `VersionCompare` (two version pickers, every field side by side, changed fields highlighted), `ErrorNote`, `ProjectLoadError` (a project that could not load: a way back when it is missing or forbidden, Retry otherwise), and the label maps in `labels.ts` (including the timeline entry types) |
 | `src/pages/` | One file per screen; `pages/home/` holds the role homes and `pages/projects/` the shared table columns and the assign dialog |
 | `src/config/` | `brand.ts` (product name, tagline, institution), `navigation.ts`, `demoAccounts.ts` |
 | `src/assets/` | Illustrations and `index.ts`, the single place every image is referenced |
-| `src/lib/` | Formatting, people helpers (initials, avatar colour, team parsing), `useProjectListParams`, `useDebouncedValue`, `useDocumentTitle`, `useNotifications` (inbox queries, mark-read mutations, `notificationLink`), `auditDetails` (one readable line per audit entry) |
+| `src/lib/` | Formatting, people helpers (initials, avatar colour, team parsing), `useProjectListParams`, `useDebouncedValue`, `useDocumentTitle`, `useNotifications` (inbox queries, mark-read mutations, `notificationLink`), `auditDetails` (one readable line per audit entry), `useRefusedAction` (reloads a project after a 403 or 409 on an action and says why) |
 
 #### 2.7.3 Data flow
 
@@ -2394,11 +2394,11 @@ The web app (`frontend/`, artifact `prastav-frontend`) is a React 18 + TypeScrip
 
 #### 2.7.4 Wizard
 
-`ProjectWizardPage` writes a proposal in four steps: Basic Info, Problem and Objectives, Methodology and Outcomes, Timeline and Review. Next validates the current step; Save draft works at every step and creates the project on the first save (`POST /api/projects`), then updates the open draft (`PUT /api/projects/{id}/proposal`). Project details (title, description, tech stack, team) are read-only when editing because the API has no endpoint to change them. Submit opens a confirmation dialog, saves, then calls `POST /api/projects/{id}/submit`. For a project in REVISION_REQUESTED the same page shows a "Revision v{n}" banner and the reviewer's latest feedback in a collapsible side panel. Leaving with unsaved changes asks for confirmation (`useBlocker` and `beforeunload`).
+`ProjectWizardPage` writes a proposal in four steps: Basic Info, Problem and Objectives, Methodology and Outcomes, Timeline and Review. Next validates the current step; Save draft works at every step and creates the project on the first save (`POST /api/projects`), then updates the open draft (`PUT /api/projects/{id}/proposal`). Project details (title, description, tech stack, team) are read-only when editing because the API has no endpoint to change them. Submit opens a confirmation dialog, saves, then calls `POST /api/projects/{id}/submit`; if that first submit fails after the project was created, the page moves to the new project's edit route, so trying again cannot create a second project. The reference link must be blank or a full web address, and `ProposalView` only makes such a value clickable. For a project in REVISION_REQUESTED the same page shows a "Revision v{n}" banner and the reviewer's latest feedback in a collapsible side panel. Leaving with unsaved changes asks for confirmation (`useBlocker` and `beforeunload`).
 
 #### 2.7.5 States and accessibility
 
-Every data view has a loading skeleton, an empty state and an error with Retry; successful actions show a toast. Inputs are labelled, errors are announced (`role="alert"`, live regions for toasts and counters), menus, tabs, the stepper and dialogs are keyboard operable with visible focus, and animations respect `prefers-reduced-motion`. The layout is designed at 1440px and works down to 360px: the sidebar becomes a drawer and tables scroll sideways.
+Every data view has a loading skeleton, an empty state and an error with Retry, and a failed count shows a dash rather than zero; successful actions show a toast under the top bar. A review decision starts with nothing chosen, so it is never recorded by default. A project that cannot be opened (403, 404 or a malformed id) shows a "not available" page with a way back rather than a Retry. When an action is refused with 403 or 409 because the project moved on, `useRefusedAction` reloads the project so the buttons match `allowedActions` again and explains why in a toast. Submit is disabled while `missingFields` is not empty. Inputs are labelled, errors are announced (`role="alert"`, live regions for toasts and counters), menus, tabs, the stepper and dialogs are keyboard operable with visible focus, and animations respect `prefers-reduced-motion`. The layout is designed at 1440px and works down to 360px: the sidebar becomes a drawer that holds focus while open, tables scroll sideways, and row menus are drawn on the body so a table cannot clip them.
 
 ## 3. Object-oriented design
 
@@ -3199,7 +3199,7 @@ Validation runs in layers, from the request body down to the database.
 | `CreateUserRequest` | as `RegisterRequest`, and role required |
 | `LoginRequest` | email and password required |
 | `CreateProjectRequest` | title required, at most 200; description required, at most 4000; techStack at most 500; teamMembers at most 2000; nested proposal validated |
-| `ProposalContent` | problemStatement, objectives, methodology and expectedOutcome at most 4000 each; timeline at most 2000; referenceLink at most 500 |
+| `ProposalContent` | problemStatement, objectives, methodology and expectedOutcome at most 4000 each; timeline at most 2000; referenceLink at most 500 and either blank or a full `http://` or `https://` link |
 | `AssignReviewerRequest` | facultyId required |
 | `ReviewRequest` | decision required; comments at most 4000 |
 
@@ -3274,6 +3274,7 @@ The lock covers `Project` only. Operations that do not save a project rely on un
 | `ReviewServiceTest` | strategy lookup per decision; review stored against latest submitted version; stale version 409 before any transition; failed transition stores nothing; non-participant 403 |
 | `ProposalServiceTest` | sequential numbering and prefill; v1 unchanged after v2 edits; one open draft; no revision while UNDER_REVIEW; no edit when SUBMITTED; owner-only edit |
 | `ProposalVersionTest` | immutability; missing-field detection; factory numbering |
+| `ProposalContentTest` | a blank or web reference link is accepted; script, data, ftp and malformed links are refused |
 | `ProposalDiffServiceTest` | every field in form order with fromValue, toValue and changed; identical versions have no changed field and reversed order is kept; version outside the project 404; same version 400 before any read; non-participant student and unassigned faculty 403 before any read; coordinator can compare; a field empty in both versions is unchanged and one filled in later is changed; comparison is exact, so case and spacing count; missing `from` version 404; versions are looked up only inside the requested project; unknown project 404 before any read; a non-participant asking for the same version twice gets 403, not 400 |
 | `ProjectServiceTest` | create in DRAFT with v1 and event; faculty cannot create; list paging, sort and first-submission time; coordinator batch filter accepted, student or faculty passing admission year or branch 403; counts per role with zero-filled statuses and awaiting-assignment for the coordinator; stranger 403; latest submitted version in detail |
 | `DashboardServiceTest` | the coordinator's summary combines the status counts, the awaiting-assignment rows (SUBMITTED) and the reviewer workload (FACULTY, UNDER_REVIEW) from the repository queries; student and faculty 403 without touching any query; through the real `ProjectService`, no projects gives every status at zero and empty lists, grouped rows are totalled with missing statuses at zero, an open review means UNDER_REVIEW only, and no project list is loaded |
@@ -3289,7 +3290,7 @@ The lock covers `Project` only. Operations that do not save a project rely on un
 | `InstitutionConfigTest` | the shipped `application.yml` binds `InstitutionProperties` and parses a demo student email |
 | `AuthServiceTest` | student registration stores admission year and branch; omitted role means STUDENT; FACULTY and COORDINATOR, faculty-style email, other domain and duplicate email rejected |
 | `UserServiceTest` | coordinator creates FACULTY and COORDINATOR without the student pattern; other callers 403; STUDENT, other domain and duplicate email rejected |
-| `ProposalControllerWebTest` (MockMvc, `@WebMvcTest`) | compare body (`fromVersion`, `toVersion`, `fields[]`); 404, 400 and 403 error bodies; missing or non-numeric version 400 without calling the service; 401 without token; an empty field is returned as null rather than left out; simultaneous next-version requests give the loser 409 with no database detail |
+| `ProposalControllerWebTest` (MockMvc, `@WebMvcTest`) | compare body (`fromVersion`, `toVersion`, `fields[]`); 404, 400 and 403 error bodies; missing or non-numeric version 400 without calling the service; 401 without token; an empty field is returned as null rather than left out; simultaneous next-version requests give the loser 409 with no database detail; a script reference link is 400 without calling the service |
 | `UserControllerWebTest` (MockMvc, `@WebMvcTest`) | coordinator gets 201 `UserResponse`; student 403; missing role 400 with field error; policy rejection 400; losing an account-creation race answers like the duplicate-email check |
 | `AuthControllerWebTest` (MockMvc, `@WebMvcTest`) | the duplicate-email check and losing a registration race to the unique index give the client the same 400 |
 | `NotificationServiceTest` | create stores an unread notification (project optional, recipient/type/message required); list and unread count scoped to the caller, unread-only filter; page and size passed to the repository, negative page and size 0 or 51 rejected; recipient marks read; another user 403; unknown id 404; mark-all-read scoped to the caller; mapper with and without project; create flushes with `saveAndFlush` |

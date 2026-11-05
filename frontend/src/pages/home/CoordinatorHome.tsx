@@ -40,7 +40,7 @@ export function CoordinatorHome({ user }: { user: UserResponse }) {
         <StatCard label="Approved" value={by?.APPROVED} icon={<CheckCircle2 className="h-6 w-6" />} tone="green" loading={counts.isLoading} to="/app/projects?status=APPROVED" />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[22rem_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[22rem_minmax(0,1fr)]">
         <Card className="p-5">
           <CardHeader
             title="Awaiting assignment"
@@ -50,6 +50,9 @@ export function CoordinatorHome({ user }: { user: UserResponse }) {
               </Link>
             }
           />
+          <div className="mt-4 empty:hidden">
+            <ErrorNote message={awaiting.error ? errorMessage(awaiting.error) : null} onRetry={() => awaiting.refetch()} />
+          </div>
           <ul className="mt-4 space-y-3">
             {awaiting.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
             {awaiting.data?.items.map((p) => (

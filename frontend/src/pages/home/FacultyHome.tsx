@@ -119,7 +119,7 @@ export function FacultyHome({ user }: { user: UserResponse }) {
         </Card>
       </div>
 
-      <aside className="space-y-6">
+      <aside className="space-y-6" aria-label="Review queue">
         <Card className="p-5">
           <CardHeader
             icon={<Clock3 className="h-5 w-5" aria-hidden />}
@@ -130,6 +130,9 @@ export function FacultyHome({ user }: { user: UserResponse }) {
               </Link>
             }
           />
+          <div className="mt-4 empty:hidden">
+            <ErrorNote message={waiting.error ? errorMessage(waiting.error) : null} onRetry={() => waiting.refetch()} />
+          </div>
           <ul className="mt-4 space-y-3">
             {waiting.isLoading && [0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full" />)}
             {waiting.data?.items.map((p) => (
