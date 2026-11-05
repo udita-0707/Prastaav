@@ -29,7 +29,8 @@
 - Query the audit log through `GET /api/audit`: newest first and paged, filtered by project, actor, action and date range.
 
 **Everyone**
-- A personal notification inbox through the API (`/api/notifications`): page through it, show only unread ones, count unread, mark one or all as read. Each notification is stored in-app and also written to the server log as the email that would be sent.
+- A notification bell in the top bar with the unread count (refreshed every 30 seconds) and a dropdown of the latest five, each of which can be marked as read or opened.
+- A full notifications page with paging and **Mark all read**. The inbox API (`/api/notifications`) also offers an unread-only filter. Each notification is stored in-app and also written to the server log as the email that would be sent.
 
 ### Screens
 
@@ -45,6 +46,7 @@
 | Edit draft or revision | `/app/projects/:id/edit` | student owner |
 | Reviews (Under Review projects) | `/app/reviews` | faculty, coordinator |
 | Assign faculty | `/app/assign` | coordinator |
+| Notifications: whole inbox, pager, mark one or all read | `/app/notifications` | everyone signed in |
 
 The mockups the screens follow are in [`docs/design`](docs/design/README.md).
 
@@ -200,10 +202,10 @@ frontend/
   src/auth/              session context and route guard
   src/assets/            illustrations and the single asset index
   src/components/ui/     design system (Button, Input, Card, StatCard, StatusPill, DataTable, Modal, Toast, …)
-  src/components/        domain components (WorkflowRail, ReviewPanel, AssignReviewerPanel, ProposalFields, ErrorNote)
+  src/components/        domain components (WorkflowRail, ReviewPanel, AssignReviewerPanel, NotificationBell, NotificationItem, ProposalFields, ErrorNote)
   src/config/           brand, navigation, demo accounts
-  src/layouts/           AppShell (sidebar, top bar), AuthLayout
-  src/lib/               formatting, people helpers, list-parameter and debounce hooks
+  src/layouts/           AppShell (sidebar, top bar with notification bell), AuthLayout
+  src/lib/               formatting, people helpers, list-parameter, debounce and notification hooks
   src/pages/             landing, auth, role homes, project list, wizard, project page, assign
   src/router.tsx         routes and guards
   tailwind.config.js     design tokens
