@@ -328,7 +328,7 @@ export function ProjectDetailPage() {
             <h2 id="next-step" className="text-lg font-bold text-ink">
               Next step
             </h2>
-            {allowed.length === 0 && (
+            {allowed.every((a) => a === 'REASSIGN_REVIEWER') && (
               <p className="flex items-start gap-3 rounded-xl bg-slate-50 p-4 text-sm text-slate-700">
                 <Hourglass className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
                 {waitingMessage(p)}
@@ -361,6 +361,7 @@ export function ProjectDetailPage() {
               </div>
             )}
             {allowed.includes('ASSIGN_REVIEWER') && <AssignReviewerPanel projectId={id} projectTitle={p.title} />}
+            {allowed.includes('REASSIGN_REVIEWER') && p.reviewer && <AssignReviewerPanel projectId={id} projectTitle={p.title} reassignFrom={p.reviewer} />}
             {reviewActions.length > 0 && <ReviewPanel projectId={id} allowed={reviewActions} versionNumber={p.latestSubmittedVersion} />}
             <ErrorNote message={actionError ? errorMessage(actionError) : null} />
           </Card>
