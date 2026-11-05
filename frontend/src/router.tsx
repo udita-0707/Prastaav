@@ -5,6 +5,7 @@ import { AssignPage } from './pages/AssignPage';
 import { HomePage } from './pages/HomePage';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { ProjectWizardPage } from './pages/ProjectWizardPage';
@@ -29,6 +30,7 @@ export const router = createBrowserRouter([
       { path: 'projects/:id', element: <ProjectDetailPage /> },
       { path: 'reviews', element: <RequireAuth roles={['FACULTY', 'COORDINATOR']}><ProjectsPage key="reviews" mode="reviews" /></RequireAuth> },
       { path: 'assign', element: <RequireAuth roles={['COORDINATOR']}><AssignPage /></RequireAuth> },
+      { path: 'notifications', element: <NotificationsPage /> },
       { path: 'projects/:id/edit', element: <RequireAuth roles={['STUDENT']}><ProjectWizardPage key="edit" /></RequireAuth> },
     ],
   },
