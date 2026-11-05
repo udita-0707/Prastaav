@@ -35,9 +35,9 @@ export function WorkflowRail({ status }: { status: ProjectStatus }) {
         const isDecision = index === 3 && state === 'current';
         const label = index === 3 ? outcome.label : step;
         return (
-          <li key={step} className="flex flex-col gap-2" aria-current={state === 'current' ? 'step' : undefined}>
+          <li key={step} className="flex min-w-0 flex-col gap-2" aria-current={state === 'current' ? 'step' : undefined}>
             <span className={clsx('h-1.5 rounded-full', state === 'pending' ? 'bg-slate-200' : isDecision && status === 'REJECTED' ? 'bg-slate-400' : isDecision && status === 'REVISION_REQUESTED' ? 'bg-rose-400' : 'bg-brand-500')} />
-            <span className="flex items-center gap-2">
+            <span className="flex flex-col items-start gap-1 sm:flex-row sm:items-center sm:gap-2">
               <span
                 className={clsx(
                   'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold',
@@ -49,7 +49,7 @@ export function WorkflowRail({ status }: { status: ProjectStatus }) {
               >
                 {state === 'done' || (isDecision && status === 'APPROVED') ? <Check className="h-3.5 w-3.5" /> : isDecision && status === 'REJECTED' ? <X className="h-3.5 w-3.5" /> : index + 1}
               </span>
-              <span className={clsx('text-xs font-semibold sm:text-sm', state === 'pending' ? 'text-muted' : 'text-ink')}>{label}</span>
+              <span className={clsx('min-w-0 break-words text-[11px] font-semibold leading-tight sm:text-sm', state === 'pending' ? 'text-muted' : 'text-ink')}>{label}</span>
             </span>
           </li>
         );

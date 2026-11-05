@@ -43,7 +43,7 @@ export function DashboardPage() {
         ))}
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_24rem]">
         <Card className="p-5 sm:p-6">
           <CardHeader title="Waiting for assignment" description="Submitted projects without a reviewer, the longest-waiting first." />
           <ul className="mt-4 space-y-3">

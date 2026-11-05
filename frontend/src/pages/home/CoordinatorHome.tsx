@@ -40,7 +40,7 @@ export function CoordinatorHome({ user }: { user: UserResponse }) {
         <StatCard label="Approved" value={by?.APPROVED} icon={<CheckCircle2 className="h-6 w-6" />} tone="green" loading={counts.isLoading} to="/app/projects?status=APPROVED" />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[22rem_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[22rem_minmax(0,1fr)]">
         <Card className="p-5">
           <CardHeader
             title="Awaiting assignment"
