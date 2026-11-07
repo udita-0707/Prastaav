@@ -1,21 +1,66 @@
-# PostgreSQL for development. The backend and frontend run locally (see README.md).
+# `docker compose up -d` starts PostgreSQL only, for running the backend and frontend from Maven and npm.
+# `docker compose --profile full up -d --build` starts the database, backend and frontend together.
+# See "Run it" in README.md. Variables listed without a value are passed on only when set, so the
+# defaults in backend/src/main/resources/application.yml and frontend/src apply otherwise.
 services:
   db:
     image: postgres:16-alpine
     container_name: prastav-db
     environment:
       POSTGRES_DB: prastav
-      POSTGRES_USER: prastav
-      POSTGRES_PASSWORD: prastav
+      POSTGRES_USER: ${DB_USER:-prastav}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-prastav}
     ports:
       - "${DB_PORT:-5432}:5432"
     volumes:
       - prastav-db-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U prastav -d prastav"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d prastav"]
       interval: 5s
       timeout: 3s
       retries: 10
+
+  backend:
+    profiles: [full]
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/prastav
+      DB_USER: ${DB_USER:-prastav}
+      DB_PASSWORD: ${DB_PASSWORD:-prastav}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:${FRONTEND_PORT:-5173}}
+      JWT_SECRET:
+      SEED_DEMO_DATA:
+      DEMO_PASSWORD:
+      INSTITUTION_NAME:
+      INSTITUTION_EMAIL_DOMAIN:
+      NOTIFICATION_CHANNELS:
+      NOTIFICATION_RETRY_MAX_ATTEMPTS:
+      NOTIFICATION_RETRY_DELAY:
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8080/v3/api-docs"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  frontend:
+    profiles: [full]
+    build:
+      context: ./frontend
+      args:
+        - VITE_INSTITUTION_NAME
+        - VITE_INSTITUTION_EMAIL_DOMAIN
+        - VITE_SHOW_DEMO_ACCOUNTS
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
 
 volumes:
   prastav-db-data:
