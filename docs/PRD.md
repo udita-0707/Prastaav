@@ -281,6 +281,7 @@ Key UI rule: the backend decides what is allowed; the UI only hides buttons base
 ### 2.10 DevOps
 
 - Git: `main` (stable) + short-lived feature branches; every change goes through a pull request reviewed by the other team member.
-- Docker Compose runs PostgreSQL 16 for development (`docker-compose.yml`); the backend runs with Maven and the frontend with npm.
+- Docker Compose runs PostgreSQL 16 for development (`docker-compose.yml`), with the backend on Maven and the frontend on npm; its `full` profile runs the database, backend and frontend together, with seed data.
+- GitHub Actions builds and tests the backend and frontend on pull requests and pushes to `main` (`.github/workflows/ci.yml`).
 - Flyway owns the schema (`backend/src/main/resources/db/migration`).
 - Swagger UI at `/swagger-ui.html` via springdoc-openapi.

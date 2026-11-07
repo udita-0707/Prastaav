@@ -26,7 +26,7 @@ node "prastav-backend (Spring Boot 3, Java 17)" {
 
 database "PostgreSQL 16\n(docker-compose)" as DB
 
-FE --> SEC : REST + Bearer JWT (/api, proxied by Vite)
+FE --> SEC : REST + Bearer JWT (/api, proxied by Vite or nginx)
 SEC --> WEB
 WEB --> AUTH
 WEB --> PROJ
