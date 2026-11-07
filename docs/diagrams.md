@@ -735,7 +735,7 @@ flowchart TB
     FLY["Flyway migrations"]
   end
   DB[("PostgreSQL 16<br/>(docker-compose)")]
-  FE -->|"REST + Bearer JWT (/api, proxied by Vite)"| SEC
+  FE -->|"REST + Bearer JWT (/api, proxied by Vite or nginx)"| SEC
   SEC --> WEB
   WEB --> AUTH
   WEB --> PROJ

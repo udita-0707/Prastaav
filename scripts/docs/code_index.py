@@ -25,7 +25,7 @@ class CodeIndex:
         self.main_classes = {os.path.basename(p)[:-5] for p in
                              glob.glob(os.path.join(ROOT, JAVA_ROOTS[0], "**/*.java"), recursive=True)}
         self.frontend_blob = "\n".join(read(p) for p in glob.glob(os.path.join(ROOT, "frontend/src/**/*.ts*"), recursive=True))
-        self.config_blob = read(os.path.join(ROOT, "backend/src/main/resources/application.yml"))
+        self.config_blob = read(os.path.join(ROOT, "backend/src/main/resources/application.yml")) + read(os.path.join(ROOT, "docker-compose.yml"))
         self.endpoints = self._endpoints()
         self.main_java = {name: source for name, source in self.java.items() if name in self.main_classes}
         self._schema()

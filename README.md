@@ -63,10 +63,11 @@ The web app is a React single-page app. Pages are composed from a small design s
 | Part | Technology |
 | --- | --- |
 | Backend (`prastav-backend`) | Java 17, Spring Boot 3.3, Spring Security (JWT), Spring Data JPA, Flyway, springdoc-openapi |
-| Database | PostgreSQL 16 (Docker Compose for development) |
+| Database | PostgreSQL 16 (Docker Compose) |
 | Frontend (`prastav-frontend`) | React 18, TypeScript, Vite, React Router, TanStack Query, Axios |
 | UI | Tailwind CSS 3, lucide-react icons, Plus Jakarta Sans (self-hosted through Fontsource) |
 | Tests | JUnit 5, Mockito, MockMvc |
+| Containers and CI | Docker, Docker Compose, nginx (serves the web app in the Docker stack), GitHub Actions |
 
 ## Institution configuration
 
@@ -89,10 +90,11 @@ Rules:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `DB_PORT` | `5432` | host port of the Docker Compose database |
-| `DB_URL` | `jdbc:postgresql://localhost:5432/prastav` | JDBC URL |
-| `DB_USER` / `DB_PASSWORD` | `prastav` / `prastav` | database credentials |
+| `BACKEND_PORT` / `FRONTEND_PORT` | `8080` / `5173` | host ports of the API and web app in the Docker stack |
+| `DB_URL` | `jdbc:postgresql://localhost:5432/prastav` | JDBC URL; the Docker stack sets its own |
+| `DB_USER` / `DB_PASSWORD` | `prastav` / `prastav` | database credentials; Docker Compose applies them only when it creates the database volume |
 | `JWT_SECRET` | development-only value | HS256 key, at least 32 bytes; set your own outside a demo |
-| `CORS_ORIGIN` | `http://localhost:5173` | allowed browser origin |
+| `CORS_ORIGIN` | `http://localhost:5173` | allowed browser origin; the Docker stack follows `FRONTEND_PORT` |
 | `SEED_DEMO_DATA` | `true` | create the demo users on an empty database |
 | `DEMO_PASSWORD` | `Password@123` | shared password of every demo account |
 | `NOTIFICATION_CHANNELS` | `in-app,email` | channels every notification is sent through, in order; `email` only writes to the log |
@@ -101,14 +103,14 @@ Rules:
 
 ### Frontend
 
-Copy `frontend/.env.example` to `frontend/.env` to change these.
+Copy `frontend/.env.example` to `frontend/.env` to change these. The Docker image does not use `frontend/.env`: for the Docker stack, set the first three as environment variables when building.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `VITE_INSTITUTION_NAME` | `Your University` | institution name in the landing page footer |
 | `VITE_INSTITUTION_EMAIL_DOMAIN` | `nst.rishihood.edu.in` | domain in the register form hint and the demo accounts; keep it equal to the backend `email-domain` |
 | `VITE_SHOW_DEMO_ACCOUNTS` | `true` | show the demo-account buttons on the sign-in page; set `false` when the backend runs without seed data |
-| `VITE_API_BASE_URL` | `/api` | API base URL; the default goes through the Vite dev proxy to port 8080 |
+| `VITE_API_BASE_URL` | `/api` | API base URL; the default goes through the Vite dev proxy to port 8080, or through nginx in the Docker stack |
 
 The product name and tagline are defined once in `frontend/src/config/brand.ts`, and every image is referenced from `frontend/src/assets/index.ts`, so the logo and illustrations can be replaced without code changes (see [`docs/design/ASSETS.md`](docs/design/ASSETS.md)).
 
@@ -146,12 +148,26 @@ npm --prefix frontend install && npm --prefix frontend run dev    # web app on h
 
 Open http://localhost:5173 and sign in with a demo account. If port 5432 is taken by a local PostgreSQL, start the database with `DB_PORT=5433 docker compose up -d` and the backend with `DB_URL=jdbc:postgresql://localhost:5433/prastav mvn -f backend/pom.xml spring-boot:run`.
 
+### Run everything in Docker
+
+The only prerequisite is Docker. This starts the database, the backend and the frontend, with the migrations applied and the demo users seeded. The first build downloads images and dependencies, so it takes a few minutes.
+
+```bash
+docker compose --profile full up -d --build     # web app on http://localhost:5173, API and Swagger on http://localhost:8080
+docker compose --profile full logs -f backend   # follow the backend log
+docker compose --profile full down              # stop everything and keep the data
+docker compose --profile full down -v           # stop everything and delete the data; the next start seeds a new database
+```
+
+The stack uses the same ports and the same database volume as the commands above, so stop any backend or Vite server you started from them first. If a port is taken, choose another, for example `DB_PORT=5433 BACKEND_PORT=8081 FRONTEND_PORT=5174 docker compose --profile full up -d --build`; the web app then opens on http://localhost:5174. Keep `--profile full` on every command: without it, `docker compose down -v` deletes the database and leaves the backend and frontend running.
+
 ### Troubleshooting
 
 - **Backend fails at startup with a connection error**: PostgreSQL is not running; check `docker compose ps`.
 - **Port 5432 already in use**: stop the local PostgreSQL, or set `DB_PORT` and `DB_URL` as shown above.
 - **"Flyway validate failed" after editing a migration**: never edit an applied migration; add a new `V<n>__...sql`, or for a throwaway demo database run `docker compose down -v`.
-- **The web app says the server is not reachable**: the backend is not on port 8080; Vite proxies `/api` there.
+- **The web app says the server is not reachable**: the backend is not on port 8080; Vite proxies `/api` there. In the Docker stack, check `docker compose --profile full ps`.
+- **Docker build stops with "docker-credential-desktop: executable file not found"**: Docker Desktop's tools are not on your `PATH`; on a Mac, run `export PATH="$PATH:/Applications/Docker.app/Contents/Resources/bin"` and build again.
 - **Demo sign-in fails with "Invalid email or password"**: the seed only runs on an empty database, so a database that already had other users has no demo accounts; for a throwaway demo database run `docker compose down -v` and start the backend again.
 - **Signed out after an hour**: the JWT expired; sign in again.
 
@@ -200,7 +216,12 @@ backend/src/main/java/com/prastav/
 backend/src/main/resources/db/migration/   Flyway migrations
 scripts/smoke.sh       end-to-end smoke test
 scripts/docs/          documentation consistency checks
+docker-compose.yml     database by default; backend and frontend too with --profile full
+.github/workflows/ci.yml   backend tests and frontend build on pull requests and pushes to main
+backend/Dockerfile     builds and runs the API jar
 frontend/
+  Dockerfile             builds the web app and serves it with nginx
+  nginx.conf             static files, single-page routes and the /api proxy
   public/brand/          logo, logo mark, favicon
   src/api/               Axios client, endpoints, DTO types
   src/auth/              session context and route guard
@@ -239,6 +260,8 @@ scripts/docs/run_all.sh                    # docs against code and diagrams agai
 ```
 
 The backend has **334 tests** in 42 test classes. The frontend has no automated tests; `npm run build` type-checks it. Because the backend tests use no database, JPQL, Flyway migrations and the real `@Version` column run only in the application itself.
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the backend tests and the frontend build on every pull request and every push to `main`.
 
 Unit tests cover every workflow state (legal and illegal transitions), `ProjectStateFactory`, `AllowedActionsResolver`, `WorkflowService` (including reviewer reassignment: allowed, wrong state, wrong role, same reviewer, event published), `ReviewService`, proposal versioning, `ProjectService` (including list paging and dashboard counts), `DashboardService` (coordinator summary from the grouped queries, other roles 403), `ProjectListQuery` (paging defaults and bounds), `ProjectSpecifications` (role scope and filters), the audit listener (including the reassignment entry), `PatternEmailPolicy` (with the shipped configuration), registration in `AuthService`, account creation in `UserService` and `NotificationService` (inbox scoping, paging bounds, unread count, read ownership), `NotificationListener` (who is notified for an assignment, a resubmission, a reassignment and each review decision, and that other status changes notify nobody), `NotificationDispatcher` (enabled channels in order, a failing channel does not stop the others, disabled channels skipped), `RetryingNotificationChannel` (no retry on success, success on a later attempt, gives up after max attempts) and the in-app and email channels. `UserControllerWebTest` checks the coordinator-only `POST /api/users`. `DashboardControllerWebTest` checks `GET /api/dashboard/summary`: 200 for the coordinator, 403 for student and faculty, 401 without a token. `NotificationControllerWebTest` checks that every role reaches only its own inbox, the paging parameters and envelope, and the 400, 401, 403 and 404 responses. `ProjectControllerWebTest` checks 400, 401, 403 and 409 error mapping through the real security configuration, plus the list filters, the page envelope, invalid list parameters, the summary endpoint and the coordinator-only reassignment.
 

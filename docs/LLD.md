@@ -127,7 +127,8 @@ The institution is configuration, not code. `InstitutionProperties` binds `prast
 | Unit tests: every state, WorkflowService, ReviewService, versioning, project list and counts, email policy, registration and account creation, notification service, listener, channels and retries, reviewer reassignment, coordinator dashboard, audit query, notification flow, concurrent updates | 334 tests in `backend/src/test/java` (see section 12) |
 | MockMvc tests (401 / 403 / 404 / 409 / 400 mapping, list and summary endpoints, coordinator dashboard, account creation, notification inbox, audit log) | `ProjectControllerWebTest` (23 tests), `DashboardControllerWebTest` (6 tests), `ProposalControllerWebTest` (9 tests), `UserControllerWebTest` (5 tests), `AuthControllerWebTest` (2 tests), `NotificationControllerWebTest` (12 tests), `AuditControllerWebTest` (20 tests), `ConcurrentSubmissionWebTest` (4 tests) |
 | React UI for three roles | `frontend/src` |
-| PostgreSQL via Docker Compose | `docker-compose.yml` (database only) |
+| PostgreSQL via Docker Compose, and the whole application with the `full` profile | `docker-compose.yml`, `backend/Dockerfile`, `frontend/Dockerfile`, `frontend/nginx.conf` |
+| Continuous integration: backend tests and frontend build on pull requests and pushes to `main` | `.github/workflows/ci.yml` |
 
 ## 2. Class design
 
@@ -3327,7 +3328,7 @@ All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring co
 | Authorization layer 2 | Ownership and assignment in the service/domain: `ProjectAccessPolicy` for reads and proposal edits, `Guards` inside state transitions. Needed because a role check cannot tell which student owns which project. |
 | Visibility | Business rule 1: `ProjectService.listProjects` scopes queries by role; `requireView` on every per-project read. Notifications: every query is scoped to the caller's id and `NotificationService.markRead` returns 403 for another user's notification |
 | Errors | 401/403 from the filter chain are written by `RestAuthErrorHandler` in `ApiError` format; no stack traces in responses |
-| CORS | Only `prastav.cors.allowed-origin` (default `http://localhost:5173`) for `/api/**`; in development Vite proxies `/api`, so the browser uses one origin |
+| CORS | Only `prastav.cors.allowed-origin` (default `http://localhost:5173`) for `/api/**`; Vite in development and nginx in the Docker stack proxy `/api`, so the browser uses one origin |
 | Registration | Self-registration limited to STUDENT with an institutional student email (`PatternEmailPolicy`); FACULTY and COORDINATOR accounts come from `POST /api/users` (COORDINATOR only) or the seed |
 | Frontend | Token in `localStorage` or `sessionStorage` (acceptable for an intranet demo; an httpOnly cookie is the hardening option). A 401 response clears the session. Route guards hide pages by role; the backend remains the authority. |
 
@@ -3356,7 +3357,7 @@ All unit tests are plain JUnit 5 + Mockito with real state objects; no Spring co
 
 ### 14.2 Known limitations
 
-The frontend has no automated tests. The JWT is kept in browser storage. Docker Compose runs only the database; the backend and frontend run from Maven and npm.
+The frontend has no automated tests. The JWT is kept in browser storage.
 
 The backend tests run without a database, so JPQL, Flyway migrations and the real `@Version` column are not exercised by `mvn test`.
 

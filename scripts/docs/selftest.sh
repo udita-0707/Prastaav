@@ -8,8 +8,8 @@ trap 'rm -rf "$work"' EXIT
 export DOCS_CHECK_ROOT="$work"
 mkdir -p "$work/backend" "$work/frontend"
 cp -R "$repo/README.md" "$repo/docs" "$repo/scripts" "$repo/docker-compose.yml" "$work/"
-cp -R "$repo/backend/src" "$work/backend/"
-cp -R "$repo/frontend/src" "$repo/frontend/.env.example" "$work/frontend/"
+cp -R "$repo/backend/src" "$repo/backend/Dockerfile" "$work/backend/"
+cp -R "$repo/frontend/src" "$repo/frontend/.env.example" "$repo/frontend/Dockerfile" "$repo/frontend/nginx.conf" "$work/frontend/"
 
 failures=0
 run() { (cd "$here" && python3 "$1" >"$work/out" 2>&1); }
